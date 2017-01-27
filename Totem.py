@@ -1,8 +1,11 @@
 import theano.tensor as T
+import theano.tensor.signal
+import theano.tensor.signal.pool
 import theano
 import numpy as np
 from sklearn.metrics import roc_auc_score
-import cPickle as pickle
+import pickle
+import theano.ifelse
 
 _floatX=theano.config.floatX
 activations={"sigmoid":T.nnet.sigmoid, "relu": T.nnet.relu, "tanh": T.tanh, "softmax": T.nnet.softmax, "None": lambda x: x, None: lambda x: x}
@@ -71,7 +74,7 @@ def conv2d(image, filter, image_shape, filter_shape, mode="valid"):
     :return: (The output of the convolution, The shape of the output (if possible) without the batch_size)
     """
     if mode=="same":
-        mode=="half"
+        mode="half"
     result= T.nnet.conv2d(image,filter,input_shape=(None,)+image_shape, filter_shape=filter_shape, border_mode=mode)
     if mode=="valid":
         op_shape=(filter_shape[0], image_shape[1]-filter_shape[2]+1, image_shape[2]-filter_shape[3]+1)
@@ -94,7 +97,7 @@ def pool(image, image_shape, ds, mode="max"):
     if mode=="avg":
         mode="average_inc_pad"
     result=T.signal.pool.pool_2d(image, ds, ignore_border=True, mode=mode)
-    op_shape=(image_shape[0], image_shape[1]/ds[0], image_shape[2]/ds[1])
+    op_shape=(image_shape[0], image_shape[1]//ds[0], image_shape[2]//ds[1])
     return (result, op_shape)
 
 
@@ -613,13 +616,14 @@ class SGD(Optimizer):
         self.layer_updates=layer_updates
         self.model_inputs=model_inputs
         self.model_outputs=model_outputs
-        self.truth_placeholder=T.ivector() if not self.one_hot else T.imatrix()
-        self.cost=objectives[self.cost_function](self.truth_placeholder, model_outputs, self.one_hot)
+        self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
+        self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
+        cost_regular=self.cost
         if self.L1!=None:
-            self.cost=self.cost+self.L1*L1_val
+            cost_regular=cost_regular+self.L1*L1_val
         if self.L2!=None:
-            self.cost=self.cost+self.L2*L2_val
-        self.model_grads=T.grad(self.cost, wrt=self.model_params)
+            cost_regular=cost_regular+self.L2*L2_val
+        self.model_grads=T.grad(cost_regular, wrt=self.model_params)
         self.updates=[(param_i, param_i-self.learning_rate*grad_i) for (param_i, grad_i) in zip(self.model_params, self.model_grads)]+self.layer_updates
         indices=T.lvector()
         self.train_step=theano.function([indices], self.cost, updates=self.updates, givens={self.model_inputs: self.data_input[indices], self.truth_placeholder: self.data_output[indices]})
@@ -657,13 +661,14 @@ class SGD_momentum(Optimizer):
         self.layer_updates=layer_updates
         self.model_inputs=model_inputs
         self.model_outputs=model_outputs
-        self.truth_placeholder=T.ivector() if not self.one_hot else T.imatrix()
-        self.cost=objectives[self.cost_function](self.truth_placeholder, model_outputs, self.one_hot)
+        self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
+        self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
+        cost_regular=self.cost
         if self.L1!=None:
-            self.cost=self.cost+self.L1*L1_val
+            cost_regular=cost_regular+self.L1*L1_val
         if self.L2!=None:
-            self.cost=self.cost+self.L2*L2_val
-        self.model_grads=T.grad(self.cost, wrt=self.model_params)
+            cost_regular=cost_regular+self.L2*L2_val
+        self.model_grads=T.grad(cost_regular, wrt=self.model_params)
         old_deltas=[theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
         new_deltas=[-self.learning_rate*grad_i+self.momentum*old_i for (grad_i, old_i) in zip(self.model_grads, old_deltas)]
         self.updates=[(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)]+[(old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)]+self.layer_updates
@@ -704,16 +709,23 @@ class Runner:
         self.test_input.set_value(test_input)
         self.test_output.set_value(test_output)
 
-    def error(self, indices, one_hot=False, thresh=0.5):
+    def error(self, one_hot=False, thresh=0.5, at_a_time=20):
         """
         Returns the average zero-one error given the indices
         :param indices: The indices of the test data to be tested
         :param one_hot: Whether the outputs of the test data are one-hot or not
         :param thresh: Threshold for decision
+        :param at_a_time: How many to be run at a time. Make sure the total is divisible by this.
         :return The error score
         """
-        op=np.asarray(self.run(indices))
-        actual=np.asarray(self.test_output[indices].eval(), dtype=np.int32)
+
+        iters=self.test_input.shape[0].eval()//at_a_time
+        indices=np.arange(self.test_input.shape[0])
+        op=np.asarray(self.run(indices[:at_a_time]))
+        for i in xrange(1,iters):
+            op=np.append(op, self.run(indices[iters*at_a_time: (iters+1)*at_a_time]))
+
+        actual=np.asarray(self.test_output.eval(), dtype=np.int32)
         if one_hot:
             threshed=np.clip(np.ceil(op-thresh), 0.0, 1.0).astype(np.int32)
             return np.mean(np.not_equal(threshed, actual))
@@ -721,16 +733,22 @@ class Runner:
             return np.mean(np.not_equal(np.argmax(op, axis=1), actual))
 
 
-    def auc_score(self, indices, mode="macro"):
+    def auc_score(self, mode="macro", at_a_time=20):
         """
         Returns the AUC score using sklearn's method
         :param indices: The indices of the test data to be tested
         :param mode: The averaging mode for AUC calculation
         :return: The AUC score
         """
-        op=np.asarray(self.run(indices), dtype=np.float32)
-        actual=np.asarray(self.test_output[indices].eval(), dtype=np.float32)
+        iters = self.test_input.shape[0].eval() // at_a_time
+        indices = np.arange(self.test_input.shape[0])
+        op = np.asarray(self.run(indices[:at_a_time]))
+        for i in xrange(1, iters):
+            op = np.append(op, self.run(indices[iters * at_a_time: (iters + 1) * at_a_time]))
+
+        actual = np.asarray(self.test_output.eval(), dtype=np.int32)
         return roc_auc_score(actual, op, average=mode)
+
 
 
 
@@ -800,4 +818,4 @@ class Model:
         Save the model to a file
         :param file: The file object to which it is to be written
         """
-        pickle.dump(self, file)
+        pickle.dump(self, file, protocol=-1)
