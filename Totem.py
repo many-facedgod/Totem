@@ -712,10 +712,9 @@ class Runner:
     def error(self, one_hot=False, thresh=0.5, at_a_time=20):
         """
         Returns the average zero-one error given the indices
-        :param indices: The indices of the test data to be tested
         :param one_hot: Whether the outputs of the test data are one-hot or not
         :param thresh: Threshold for decision
-        :param at_a_time: How many to be run at a time. Make sure the total is divisible by this.
+        :param at_a_time: How many to be run at a time.
         :return The error score
         """
 
@@ -723,7 +722,7 @@ class Runner:
         indices=np.arange(self.test_input.shape[0])
         op=np.asarray(self.run(indices[:at_a_time]))
         for i in xrange(1,iters):
-            op=np.append(op, self.run(indices[iters*at_a_time: (iters+1)*at_a_time]))
+            op=np.append(op, self.run(indices[i*at_a_time: (i+1)*at_a_time]))
 
         actual=np.asarray(self.test_output.eval(), dtype=np.int32)
         if one_hot:
@@ -736,15 +735,15 @@ class Runner:
     def auc_score(self, mode="macro", at_a_time=20):
         """
         Returns the AUC score using sklearn's method
-        :param indices: The indices of the test data to be tested
         :param mode: The averaging mode for AUC calculation
+        :param at_a_time: How many to be run at a time.
         :return: The AUC score
         """
-        iters = self.test_input.shape[0].eval() // at_a_time
+        iters = int(np.ceil(self.test_input.shape[0].eval()/float(at_a_time)))
         indices = np.arange(self.test_input.shape[0])
         op = np.asarray(self.run(indices[:at_a_time]))
         for i in xrange(1, iters):
-            op = np.append(op, self.run(indices[iters * at_a_time: (iters + 1) * at_a_time]))
+            op = np.append(op, self.run(indices[i * at_a_time: (i + 1) * at_a_time]))
 
         actual = np.asarray(self.test_output.eval(), dtype=np.int32)
         return roc_auc_score(actual, op, average=mode)
