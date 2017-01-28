@@ -9,7 +9,7 @@ def get_data(data_xy):
     datax, datay=data_xy
     sharedx=theano.shared(np.asarray(datax, dtype=theano.config.floatX), borrow=True)
     sharedy=theano.shared(np.asarray(datay, dtype=theano.config.floatX), borrow=True)
-    return sharedx, T.cast(sharedy, dtype="int32")
+    return sharedx, sharedy
 
 r=RNG(12234)
 f=gzip.open("/home/tanmaya/mnist.pkl.gz", "rb")
@@ -20,7 +20,7 @@ n_batches=100
 batch_size=500
 x=Model((1,28,28))
 n_iters=100
-x.add_layer(ConvLayer(10,(4,4),r, activation=None))
+x.add_layer(ConvLayer(10,(4,4),r, activation=None, init_method="he", strides=(2,2)))
 x.add_layer(BNLayer())
 x.add_layer(ActLayer(activation="relu"))
 x.add_layer(PoolLayer((2,2), mode="max"))
@@ -47,7 +47,7 @@ for i in xrange(n_iters):
         cost.append(opt.train_step(g[j*batch_size: (j+1)*batch_size]))
     print "Average cost for the iteration: {}".format(np.mean(cost))
     x.change_is_training(False)
-    print "The validation error: {}".format(run.error(h))
+    print "The validation error: {}".format(run.error())
 
 f=gzip.open("MNIST_trained.pkl.gz", "wb")
 x.save(f)

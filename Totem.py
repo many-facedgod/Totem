@@ -63,25 +63,29 @@ def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03):
     return(X-mean)*(gamma/T.sqrt(variance + epsilon)) + beta
 
 
-def conv2d(image, filter, image_shape, filter_shape, mode="valid"):
+def conv2d(image, filter, image_shape, filter_shape, strides = (1,1), mode="valid"):
     """
     Returns a 2D convolution of the image with the filter
     :param image: A 4D tensor of the shape (batch_size, channels, height, width)
     :param filter: A 4D tensor representing the filters
     :param image_shape: Tuple having the last 3 dimensions of the image (not including batch size)
     :param filter_shape: Tuple having the filter size
+    :param strides: The subsampling strides
     :param mode: The padding mode: "valid",  "full"
     :return: (The output of the convolution, The shape of the output (if possible) without the batch_size)
     """
-    if mode=="same":
-        mode="half"
-    result= T.nnet.conv2d(image,filter,input_shape=(None,)+image_shape, filter_shape=filter_shape, border_mode=mode)
-    if mode=="valid":
-        op_shape=(filter_shape[0], image_shape[1]-filter_shape[2]+1, image_shape[2]-filter_shape[3]+1)
-    elif mode=="full":
-        op_shape=(filter_shape[0], image_shape[1]+filter_shape[2]-1, image_shape[2]+filter_shape[3]-1)
+    modes={"valid": (0, 0), "half": (filter_shape[2] // 2, filter_shape[3] // 2), "full": (filter_shape[2] - 1, filter_shape[3] -1), "same": (filter_shape[2] // 2, filter_shape[3] // 2)}
+
+    if type(mode)==str:
+        padding=modes[mode]
     else:
-        op_shape=(filter_shape[0], image_shape[1] if filter_shape[2]%2==1 else image_shape[1]+1, image_shape[2] if filter_shape[3]%2==1 else image_shape[2]+1)
+        padding=mode
+
+    if type(strides)==int:
+        strides=(strides, strides)
+
+    result=T.nnet.conv2d(image, filter, input_shape=(None, ) + image_shape, filter_shape=filter_shape, border_mode=padding, subsample=strides)
+    op_shape=(filter_shape[0], ((image_shape[1] + 2 * padding[0] - filter_shape[2]) // strides[0]) + 1, ((image_shape[2] + 2 * padding[1] - filter_shape[3]) // strides[1]) + 1)
     return (result, op_shape)
 
 
@@ -115,7 +119,7 @@ def categorical_crossentropy(Y_true, Y_pred, one_hot=False, epsilon=1e-15):
     :return: Tensor representing the loss.
     """
     if not one_hot:
-        return -T.mean(T.log(T.clip(Y_pred[T.arange(Y_pred.shape[0]), Y_true], epsilon, np.inf)))
+        return -T.mean(T.log(T.clip(Y_pred[T.arange(Y_pred.shape[0]), Y_true], floatX(epsilon), floatX(np.inf))))
     else:
         return T.mean(T.nnet.categorical_crossentropy(Y_pred, Y_true))
 
@@ -129,7 +133,7 @@ def mean_squared_error(Y_true, Y_pred, one_hot=True):
     """
 
     if not one_hot:
-        raise ValueError
+        raise ValueError ("Not implemented")
 
     return T.mean(T.square(Y_true-Y_pred))
 
@@ -141,7 +145,7 @@ def binary_crossentropy(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError
+        raise ValueError ("Not implemented")
 
     return T.mean(T.nnet.binary_crossentropy(Y_pred, Y_true))
 
@@ -154,7 +158,7 @@ def mean_absolute_error(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError
+        raise ValueError ("Not implemented")
 
     return T.mean(T.abs_(Y_true-Y_pred))
 
@@ -168,6 +172,7 @@ class RNG:
     def __init__(self, seed):
         self.np_rng=np.random.RandomState(seed)
         self.th_rng=T.shared_randomstreams.RandomStreams(seed)
+        self.distributions={"normal": self.Gaussian, "gaussian": self.Gaussian, "uniform": self.Uniform}
 
     def random(self, dtype=_floatX):
         """
@@ -176,7 +181,23 @@ class RNG:
         """
         return np.cast[dtype](self.np_rng.uniform())
 
-    def Glorot(self, shape, mode="FC", scale="relu", dtype=_floatX):
+    def Gaussian(self, mean, stddev, shape, dtype):
+        return self.np_rng.normal(loc=mean, scale=stddev, size=shape).astype(dtype)
+
+    def Uniform(self, mean, stddev, shape, dtype):
+        """
+        Returns an array of samples drawn from a uniform distribution with the given params
+        :param mean: The mean of the distribution
+        :param stddev: The standard deviaion of the dis
+        :param shape:
+        :param dtype:
+        :return:
+        """
+        low = mean - stddev*np.sqrt(3)
+        high = mean + stddev*np.sqrt(3)
+        return self.np_rng.uniform(low = low, high = high, size = shape).astype(dtype)
+
+    def get_weights(self, shape, distribution = "normal", method = "glorot", mode="FC", scale="relu", dtype=_floatX):
         """
         Returns a numpy ndarray of weights with Glorot style initialization
         :param shape: Shape of the required weight matrix (a tuple)
@@ -185,24 +206,31 @@ class RNG:
         :param dtype: The data type of the output array
         :return: The generated weights
         """
-        if scale=="relu":
-            z=np.sqrt(2)
-        elif scale=="sigmoid":
-            z=4
-        elif scale=="tanh":
-            z=1
-        else:
-            z=1
-        if mode=="FC":
-            limit=np.sqrt(6.0/(shape[0]+shape[1]))
-            weights=(z*self.np_rng.uniform(low=-limit, high=limit, size=shape)).astype(dtype)
-        elif mode=="CONV":
-            limit=np.sqrt(6.0/(shape[0]*shape[2]*shape[3]+shape[1]*shape[2]*shape[3]))
-            weights=(z*self.np_rng.uniform(low=-limit, high=limit, size=shape)).astype(dtype)
-        else:
-            raise TypeError
 
-        return weights
+
+        if scale=="sigmoid":
+            z=4
+        else:
+            z=1
+
+        if mode=="FC":
+            fan_in=shape[0]
+            fan_out=shape[1]
+        elif mode=="CONV":
+            fan_in=shape[1]*shape[2]*shape[3]
+            fan_out=shape[0]*shape[2]*shape[3]
+        else:
+            raise ValueError ("Unrecognized mode")
+
+        if method=="glorot":
+            stddev=np.sqrt(2.0 / ( fan_in + fan_out))
+        elif method=="he":
+            stddev=np.sqrt(2.0 / (fan_in))
+        else:
+            raise ValueError ("Not supported")
+
+        return z*(self.distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
+
 
     def Orthogonal(self, shape, mode="FC", scale="relu", dtype=_floatX):
         """
@@ -217,10 +245,9 @@ class RNG:
             z=np.sqrt(2)
         elif scale=="sigmoid":
             z=4
-        elif scale=="tanh":
-            z=1
         else:
             z=1
+
         if mode=="FC":
             sample=self.np_rng.normal(size=shape)
             U,_,_=np.linalg.svd(sample)
@@ -288,7 +315,7 @@ class FCLayer(Layer):
     """
     A layer implementing f(Wx+b)
     """
-    def __init__(self, n_units, rng, activation="relu"):
+    def __init__(self, n_units, rng, activation="relu", init_method="glorot"):
         """
         Constructor
         :param n_units: Number of fully connected units in the layer
@@ -299,6 +326,7 @@ class FCLayer(Layer):
         self.n_units=n_units
         self.rng=rng
         self.activation=activation
+        self.init_method=init_method
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -310,7 +338,7 @@ class FCLayer(Layer):
         self.input_shape=input_shape
         self.is_training=is_training
         self.output_shape=(self.n_units, )
-        self.weights=theano.shared(self.rng.Glorot((self.input_shape[0], self.n_units), "FC", scale=self.activation) , borrow=True)
+        self.weights=theano.shared(self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method, mode="FC", scale=self.activation, dtype=_floatX) , borrow=True)
         self.bias=theano.shared(np.zeros(self.n_units, dtype=_floatX), borrow=True)
         self.inputs=inputs
         self.outputs=activations[self.activation](T.dot(self.inputs, self.weights)+self.bias)
@@ -325,7 +353,7 @@ class ConvLayer(Layer):
     A layer implementing a convolution on images
     """
 
-    def __init__(self, filter_num, filter_size, rng, activation="relu", mode="valid"):
+    def __init__(self, filter_num, filter_size, rng, activation="relu", mode="valid", strides=(1,1), init_method="glorot"):
         """
         Constructor for a convolution layer
         :param filter_num: Number of filters
@@ -340,6 +368,8 @@ class ConvLayer(Layer):
         self.rng=rng
         self.activation=activation
         self.mode=mode
+        self.init_method=init_method
+        self.strides=strides
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -352,9 +382,9 @@ class ConvLayer(Layer):
         self.inputs=inputs
         self.is_training=is_training
         self.filter_shape=(self.filter_num, input_shape[0])+ self.filter_size
-        self.filter=theano.shared(self.rng.Glorot(self.filter_shape, "CONV", scale=self.activation))
+        self.filter=theano.shared(self.rng.get_weights(self.filter_shape, distribution="normal", method=self.init_method, mode="CONV", scale=self.activation, dtype=_floatX), borrow=True)
         self.bias=theano.shared(np.zeros(self.filter_num, dtype=_floatX), borrow=True)
-        conv, shape=conv2d(inputs, self.filter, input_shape, self.filter_shape, mode=self.mode)
+        conv, shape=conv2d(inputs, self.filter, input_shape, self.filter_shape, mode=self.mode, strides=self.strides)
         self.outputs=activations[self.activation](conv+ self.bias.dimshuffle('x',0,'x','x'))
         self.params=[self.filter, self.bias]
         self.L1=T.sum(T.abs_(self.filter))+T.sum(T.abs_(self.bias))
@@ -711,20 +741,19 @@ class Runner:
 
     def error(self, one_hot=False, thresh=0.5, at_a_time=20):
         """
-        Returns the average zero-one error given the indices
+        Returns the average zero-one error for the test data
         :param one_hot: Whether the outputs of the test data are one-hot or not
         :param thresh: Threshold for decision
-        :param at_a_time: How many to be run at a time.
+        :param at_a_time: How many to be run at a time. Make sure the total is divisible by this.
         :return The error score
         """
 
-        iters=self.test_input.shape[0].eval()//at_a_time
-        indices=np.arange(self.test_input.shape[0])
+        iters = int(np.ceil(self.test_input.shape[0].eval() / floatX(at_a_time)))
+        indices=np.arange(self.test_input.shape[0].eval())
         op=np.asarray(self.run(indices[:at_a_time]))
-        for i in xrange(1,iters):
-            op=np.append(op, self.run(indices[i*at_a_time: (i+1)*at_a_time]))
-
-        actual=np.asarray(self.test_output.eval(), dtype=np.int32)
+        for i in range(1,iters):
+            op=np.append(op, self.run(indices[i*at_a_time: (i+1)*at_a_time]), axis=0)
+        actual=np.asarray(self.test_output.get_value(), dtype=np.int32)
         if one_hot:
             threshed=np.clip(np.ceil(op-thresh), 0.0, 1.0).astype(np.int32)
             return np.mean(np.not_equal(threshed, actual))
@@ -736,16 +765,16 @@ class Runner:
         """
         Returns the AUC score using sklearn's method
         :param mode: The averaging mode for AUC calculation
-        :param at_a_time: How many to be run at a time.
+        :param at_a_time: How many to be run at a time. Make sure the total is divisible by this.
         :return: The AUC score
         """
-        iters = int(np.ceil(self.test_input.shape[0].eval()/float(at_a_time)))
-        indices = np.arange(self.test_input.shape[0])
+        iters = int(np.ceil(self.test_input.shape[0].eval() / floatX(at_a_time)))
+        indices = np.arange(self.test_input.shape[0].eval())
         op = np.asarray(self.run(indices[:at_a_time]))
-        for i in xrange(1, iters):
-            op = np.append(op, self.run(indices[i * at_a_time: (i + 1) * at_a_time]))
+        for i in range(1, iters):
+            op = np.append(op, self.run(indices[i * at_a_time: (i + 1) * at_a_time]), axis=0)
 
-        actual = np.asarray(self.test_output.eval(), dtype=np.int32)
+        actual = np.asarray(self.test_output.eval())
         return roc_auc_score(actual, op, average=mode)
 
 
