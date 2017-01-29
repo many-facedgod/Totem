@@ -49,7 +49,7 @@ def exp_avg(X_curr, X_new, momentum):
     return (X_curr, X_curr*momentum+X_new*(1-momentum))
 
 
-def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03):
+def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03, mode="low_mem"):
     """
     Returns a batch normalization graph for a batch
     :param X: Input batch
@@ -58,9 +58,12 @@ def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03):
     :param gamma: The scaling parameter
     :param beta: The shifting parameter
     :param epsilon: The smoothing factor
+    :param mode: The mode for theano's batch normalization method: "low_mem" or "high_mem". Recommended is "low_mem"
     :return: Tensor representing the normalized input
     """
-    return(X-mean)*(gamma/T.sqrt(variance + epsilon)) + beta
+
+    stddev=T.sqrt(variance + epsilon)
+    return T.nnet.bn.batch_normalization(X, gamma, beta, mean, stddev, mode)
 
 
 def conv2d(image, filter, image_shape, filter_shape, strides = (1,1), mode="valid"):
@@ -87,6 +90,8 @@ def conv2d(image, filter, image_shape, filter_shape, strides = (1,1), mode="vali
     result=T.nnet.conv2d(image, filter, input_shape=(None, ) + image_shape, filter_shape=filter_shape, border_mode=padding, subsample=strides)
     op_shape=(filter_shape[0], ((image_shape[1] + 2 * padding[0] - filter_shape[2]) // strides[0]) + 1, ((image_shape[2] + 2 * padding[1] - filter_shape[3]) // strides[1]) + 1)
     return (result, op_shape)
+
+
 
 
 def pool(image, image_shape, ds, mode="max"):
@@ -163,7 +168,8 @@ def mean_absolute_error(Y_true, Y_pred, one_hot=True):
     return T.mean(T.abs_(Y_true-Y_pred))
 
 
-objectives={"cce":categorical_crossentropy, "mse": mean_squared_error, "bce": binary_crossentropy, "mae": mean_absolute_error}
+
+objectives = {"cce":categorical_crossentropy, "mse": mean_squared_error, "bce": binary_crossentropy, "mae": mean_absolute_error}
 
 class RNG:
     """
@@ -172,7 +178,7 @@ class RNG:
     def __init__(self, seed):
         self.np_rng=np.random.RandomState(seed)
         self.th_rng=T.shared_randomstreams.RandomStreams(seed)
-        self.distributions={"normal": self.Gaussian, "gaussian": self.Gaussian, "uniform": self.Uniform}
+
 
     def random(self, dtype=_floatX):
         """
@@ -206,7 +212,7 @@ class RNG:
         :param dtype: The data type of the output array
         :return: The generated weights
         """
-
+        distributions = {"normal": self.Gaussian, "gaussian": self.Gaussian, "uniform": self.Uniform}
 
         if scale=="sigmoid":
             z=4
@@ -229,7 +235,7 @@ class RNG:
         else:
             raise ValueError ("Not supported")
 
-        return z*(self.distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
+        return z*(distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
 
 
     def Orthogonal(self, shape, mode="FC", scale="relu", dtype=_floatX):
@@ -454,6 +460,7 @@ class ActLayer(Layer):
         self.updates=[]
 
 
+
 class ReshapeLayer(Layer):
     """
     A layer representing the reshape option
@@ -546,15 +553,17 @@ class BNLayer(Layer):
     A layer that implements batch normalization between layers
     """
 
-    def __init__(self, epsilon=1e-03, momentum=0.99):
+    def __init__(self, epsilon=1e-03, momentum=0.99, mode="low_mem"):
         """
         Constructor for the layer
         :param epsilon: The epsilon parameter in batch normalization
         :param momentum: The momentum for the running average of mean and variance
+        :param mode: The mode for theano's batch normalization function: "low_mem" or "high_mem" Recommended is low_mem.
         """
         Layer.__init__(self)
         self.epsilon=epsilon
         self.momentum=momentum
+        self.mode=mode
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -572,7 +581,7 @@ class BNLayer(Layer):
         self.beta=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
         cur_mean=T.mean(inputs, axis=0)
         cur_var=T.var(inputs, axis=0)
-        self.outputs=theano.ifelse.ifelse(is_training, BNormalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta, self.epsilon), BNormalize(self.inputs, self.mean, self.var, self.gamma, self.beta, self.epsilon))
+        self.outputs=theano.ifelse.ifelse(is_training, BNormalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta, self.epsilon, self.mode), BNormalize(self.inputs, self.mean, self.var, self.gamma, self.beta, self.epsilon, self.mode))
         self.output_shape=self.input_shape
         self.params=[self.gamma, self.beta]
         self.updates=[exp_avg(self.mean, cur_mean, self.momentum), exp_avg(self.var, cur_var, self.momentum)]
