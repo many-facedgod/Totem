@@ -302,37 +302,75 @@ class Layer:
     """
     Abstract class for the layer interface
     """
-    def __init__(self):
-        self.params=None
+    def __init__(self, name):
+        self.params=[]
         self.inputs=None
         self.outputs=None
         self.input_shape=None
         self.output_shape=None
-        self.updates=None
-        self.L1=None
-        self.L2=None
+        self.updates=[]
+        self.L1=T.constant(0.0)
+        self.L2=T.constant(0.0)
         self.is_training=None
+        self.name=name
 
     def build(self, inputs, input_shape, is_training):
         return None
+
+
+
+class JoinLayer(Layer):
+    """
+    This layer concatenates the input of two layers.
+    """
+    def __init__(self, name, axis):
+        """
+        Constructor
+        :param name: The name of this layer. Not optional.
+        :param axis: Axis along which concatenation is to happen. Note that the batch axis is 0.
+        """
+        Layer.__init__(self, name)
+        self.axis=axis
+
+    def build(self, inputs, input_shape, is_training):
+        """
+        Building the actual layer
+        :param inputs: A list of inputs of previous layers
+        :param input_shape: A list of input_shape tuples of previous layers
+        :param is_training: Whether the model is training or not
+        :return:
+        """
+        self.inputs=inputs
+        self.input_shape=input_shape
+        self.is_training=is_training
+        self.outputs=T.concatenate(inputs, axis=self.axis)
+        if self.axis==0:
+            self.output_shape=self.input_shape[0]
+        else:
+            sum=np.sum(self.input_shape, axis=0)[self.axis-1]
+            self.output_shape=tuple([x if ind!=(self.axis -1) else sum for ind, x in enumerate(input_shape[0])])
+
+
 
 class FCLayer(Layer):
 
     """
     A layer implementing f(Wx+b)
     """
-    def __init__(self, n_units, rng, activation="relu", init_method="glorot"):
+    def __init__(self, name, n_units, rng, activation="relu", init_method="glorot"):
         """
         Constructor
+        :param name: The name of this layer. Not optional.
         :param n_units: Number of fully connected units in the layer
         :param rng: An RNG instance
         :param activation: The name of the activation function to be used
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.n_units=n_units
         self.rng=rng
         self.activation=activation
         self.init_method=init_method
+
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -351,7 +389,7 @@ class FCLayer(Layer):
         self.params=[self.weights, self.bias]
         self.L1=T.sum(T.abs_(self.weights))+T.sum(T.abs_(self.bias))
         self.L2=T.sum(T.square(self.weights))+T.sum(T.square(self.bias))
-        self.updates=[]
+
 
 
 class ConvLayer(Layer):
@@ -359,16 +397,17 @@ class ConvLayer(Layer):
     A layer implementing a convolution on images
     """
 
-    def __init__(self, filter_num, filter_size, rng, activation="relu", mode="valid", strides=(1,1), init_method="glorot"):
+    def __init__(self, name, filter_num, filter_size, rng, activation="relu", mode="valid", strides=(1,1), init_method="glorot"):
         """
         Constructor for a convolution layer
+        :param name: The name of this layer. Not optional.
         :param filter_num: Number of filters
         :param filter_size: Size of each filter (2D)
         :param rng: RNG instance for weight initialization
         :param activation: activation function
         :param mode: Convolution padding mode
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.filter_num=filter_num
         self.filter_size=filter_size
         self.rng=rng
@@ -396,20 +435,21 @@ class ConvLayer(Layer):
         self.L1=T.sum(T.abs_(self.filter))+T.sum(T.abs_(self.bias))
         self.L2=T.sum(T.square(self.filter))+T.sum(T.square(self.bias))
         self.output_shape=shape
-        self.updates=[]
+
 
 
 class PoolLayer(Layer):
     """
     A layer implementing 2D pooling
     """
-    def __init__(self, down_sample_size, mode="max"):
+    def __init__(self, name, down_sample_size, mode="max"):
         """
         Constructor for the layer
+        :param name: The name of this layer. Not optional.
         :param down_sample_size: Tuple of length two having the down sample size in both dimesions
         :param mode: Mode for pooling: "max", "avg"
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.down_sample_size=down_sample_size
         self.mode=mode
 
@@ -424,22 +464,20 @@ class PoolLayer(Layer):
         self.inputs=inputs
         self.is_training=is_training
         self.outputs, self.output_shape=pool(inputs, input_shape, self.down_sample_size, self.mode)
-        self.params=[]
-        self.L1=T.constant(0.)
-        self.L2=T.constant(0.)
-        self.updates=[]
+
 
 
 class ActLayer(Layer):
     """
     A layer representing just an activation function
     """
-    def __init__(self, activation):
+    def __init__(self, name, activation):
         """
         Constructor for the layer
+        :param name: The name of this layer. Not optional.
         :param activation: The activation function
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.activation=activation
 
     def build(self, inputs, input_shape, is_training):
@@ -454,10 +492,7 @@ class ActLayer(Layer):
         self.is_training=is_training
         self.outputs=activations[self.activation](self.inputs)
         self.output_shape=input_shape
-        self.params=[]
-        self.L1 = T.constant(0.)
-        self.L2 = T.constant(0.)
-        self.updates=[]
+
 
 
 
@@ -466,8 +501,13 @@ class ReshapeLayer(Layer):
     A layer representing the reshape option
     """
 
-    def __init__(self, new_shape):
-        Layer.__init__(self)
+    def __init__(self, name, new_shape):
+        """
+        Constructor for the layer
+        :param name: The name of this layer. Not optional.
+        :param new_shape: The new shape. Must be compatible.
+        """
+        Layer.__init__(self, name)
         self.output_shape=new_shape
 
     def build(self, inputs, input_shape, is_training):
@@ -481,10 +521,7 @@ class ReshapeLayer(Layer):
         self.inputs=inputs
         self.input_shape=input_shape
         self.outputs=T.reshape(inputs, (inputs.shape[0], )+self.output_shape, ndim=len(self.output_shape)+1)
-        self.params=[]
-        self.L1=T.constant(0.)
-        self.L2=T.constant(0.)
-        self.updates=[]
+
 
 
 class DropOutLayer(Layer):
@@ -492,13 +529,14 @@ class DropOutLayer(Layer):
     A layer representing noise
     """
 
-    def __init__(self, rng, keep_prob=0.7):
+    def __init__(self, name, rng, keep_prob=0.7):
         """
         Constructor for the layer
+        :param name: The name of this layer. Not optional.
         :param rng: An RNG instance for generating the noise
         :param keep_prob: The probability of a signal to remain uncorrupted
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.rng=rng
         self.keep_prob=keep_prob
 
@@ -514,21 +552,18 @@ class DropOutLayer(Layer):
         self.is_training=is_training
         self.inputs=inputs
         self.outputs=theano.ifelse.ifelse(is_training, inputs*self.rng.DropoutMask(shape=input_shape, keep_prob=self.keep_prob), inputs)
-        self.params=[]
-        self.L1=T.constant(0.)
-        self.L2=T.constant(0.)
-        self.updates=[]
 
 class FlattenLayer(Layer):
     """
     A layer that flattens all dimensions but one (leaves the batch dimension untouched)
     """
 
-    def __init__(self):
+    def __init__(self, name):
         """
         Constructor for the layer
+        :param name: The name of this layer. Not optional.
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
 
     def build(self, inputs, input_shape,is_training):
         """
@@ -542,10 +577,7 @@ class FlattenLayer(Layer):
         self.is_training=is_training
         self.outputs=T.flatten(inputs, 2)
         self.output_shape= (np.prod(input_shape),)
-        self.L1 = T.constant(0.)
-        self.L2 = T.constant(0.)
-        self.updates = []
-        self.params=[]
+
 
 
 class BNLayer(Layer):
@@ -553,17 +585,22 @@ class BNLayer(Layer):
     A layer that implements batch normalization between layers
     """
 
-    def __init__(self, epsilon=1e-03, momentum=0.99, mode="low_mem"):
+    def __init__(self, name, epsilon=1e-03, momentum=0.99, mode="low_mem"):
         """
         Constructor for the layer
+        :param name: The name of this layer. Not optional.
         :param epsilon: The epsilon parameter in batch normalization
         :param momentum: The momentum for the running average of mean and variance
         :param mode: The mode for theano's batch normalization function: "low_mem" or "high_mem" Recommended is low_mem.
         """
-        Layer.__init__(self)
+        Layer.__init__(self, name)
         self.epsilon=epsilon
         self.momentum=momentum
         self.mode=mode
+        self.mean=None
+        self.var=None
+        self.gamma=None
+        self.beta=None
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -576,7 +613,7 @@ class BNLayer(Layer):
         self.input_shape=input_shape
         self.is_training=is_training
         self.mean=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
-        self.var=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
+        self.var=theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
         self.gamma=theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
         self.beta=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
         cur_mean=T.mean(inputs, axis=0)
@@ -606,8 +643,8 @@ class Optimizer:
         self.one_hot=one_hot
         self.cost=None
         self.updates=None
-        self.data_input=data_input
-        self.data_output=data_output
+        self.data_input=theano.shared(np.asarray(data_input, dtype=_floatX), borrow=True, name="Train_Input")
+        self.data_output=theano.shared(np.asarray(data_output, dtype=_floatX), borrow=True, name="Train_Output")
         self.L1=L1
         self.L2=L2
 
@@ -621,8 +658,8 @@ class Optimizer:
         :param data_input: numpy array of the new input set
         :param data_output: numpy array of the new output set
         """
-        self.data_input.set_value(data_input)
-        self.data_output.set_value(data_output)
+        self.data_input.set_value(np.asarray(data_input, dtype=_floatX))
+        self.data_output.set_value(np.asarray(data_output, dtype=_floatX))
 
 class SGD(Optimizer):
     """
@@ -642,7 +679,7 @@ class SGD(Optimizer):
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
         self.learning_rate=learning_rate
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, L1_val, L2_val):
+    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
         """
         Building the actual optimizer. To be called by the model's build_optimizer method
 
@@ -658,10 +695,10 @@ class SGD(Optimizer):
         self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
         self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
         cost_regular=self.cost
-        if self.L1!=None:
-            cost_regular=cost_regular+self.L1*L1_val
-        if self.L2!=None:
-            cost_regular=cost_regular+self.L2*L2_val
+        if self.L1 is not None:
+            cost_regular=cost_regular+self.L1*l1_val
+        if self.L2 is not None:
+            cost_regular=cost_regular+self.L2*l2_val
         self.model_grads=T.grad(cost_regular, wrt=self.model_params)
         self.updates=[(param_i, param_i-self.learning_rate*grad_i) for (param_i, grad_i) in zip(self.model_params, self.model_grads)]+self.layer_updates
         indices=T.lvector()
@@ -687,7 +724,7 @@ class SGD_momentum(Optimizer):
         self.learning_rate=learning_rate
         self.momentum=momentum
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, L1_val, L2_val):
+    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
         """
         Building the actual optimizer. To be called by the model's build_optimizer method
 
@@ -703,10 +740,10 @@ class SGD_momentum(Optimizer):
         self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
         self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
         cost_regular=self.cost
-        if self.L1!=None:
-            cost_regular=cost_regular+self.L1*L1_val
-        if self.L2!=None:
-            cost_regular=cost_regular+self.L2*L2_val
+        if self.L1 is not None:
+            cost_regular=cost_regular+self.L1*l1_val
+        if self.L2 is not None:
+            cost_regular=cost_regular+self.L2*l2_val
         self.model_grads=T.grad(cost_regular, wrt=self.model_params)
         old_deltas=[theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
         new_deltas=[-self.learning_rate*grad_i+self.momentum*old_i for (grad_i, old_i) in zip(self.model_grads, old_deltas)]
@@ -734,10 +771,10 @@ class Runner:
         self.model_outputs=model_outputs
         self.is_training=is_training
         self.input_shape=input_shape
-        self.test_input=test_input
-        self.test_output=test_output
+        self.test_input=theano.shared(np.asarray(test_input, dtype=_floatX), borrow=True)
+        self.test_output=theano.shared(np.asarray(test_output, dtype=_floatX), borrow=True)
         index=T.lvector()
-        self.run=theano.function([index], self.model_outputs, givens={self.input_placeholder: test_input[index]})
+        self.run=theano.function([index], self.model_outputs, givens={self.input_placeholder: self.test_input[index]})
 
     def set_value(self, test_input, test_output):
         """
@@ -745,8 +782,8 @@ class Runner:
         :param test_input: numpy array of the new input values
         :param test_output: numpy array of the new output values
         """
-        self.test_input.set_value(test_input)
-        self.test_output.set_value(test_output)
+        self.test_input.set_value(np.asarray(test_input, dtype=_floatX))
+        self.test_output.set_value(np.asarray(test_output, dtype=_floatX))
 
     def error(self, one_hot=False, thresh=0.5, at_a_time=20):
         """
@@ -798,12 +835,13 @@ class Model:
         """
         self.params=[]
         self.layers=[]
+        self.layer_names=[]
         self.updates=[]
         self.input_shape=input_shape
         self.input_placeholder=tensors[len(input_shape)+1]("input_placeholder")
         self.is_training=theano.shared(1)
-        self.L1=None
-        self.L2=None
+        self.L1=T.constant(0.0)
+        self.L2=T.constant(0.0)
 
     def change_is_training(self, mode):
         """
@@ -816,30 +854,61 @@ class Model:
             mode=0
         self.is_training.set_value(mode)
 
-    def add_layer(self, layer):
+    def add_layer(self, layer, source=-1):
         """
         Add a layer to the model
         :param layer: The layer to be added
+        :param source: The source of the input to this layer. It can be the name of a layer, -1 for the last added layer
+                        and "inputs" for the original. If the layer is a JoinLayer, use a tuple of names/-1/"inputs"
         """
-        self.layers.append(layer)
-        if len(self.layers)==1:
-            layer.build(self.input_placeholder, self.input_shape, self.is_training)
-            self.L1=layer.L1
-            self.L2=layer.L2
-        else:
-            layer.build(self.layers[len(self.layers)-2].outputs, self.layers[len(self.layers)-2].output_shape, self.is_training)
-            self.L1=self.L1+layer.L1
-            self.L2=self.L2+layer.L2
 
-        self.params=self.params+layer.params
-        self.updates=self.updates+layer.updates
+        if len(self.layers)==0:
+            assert not isinstance(layer, JoinLayer), "Cannot have JoinLayer as the first layer"
+            inp=self.input_placeholder
+            inpsh=self.input_shape
+
+        elif not isinstance(layer, JoinLayer):
+            if source==-1:
+                inp=self.layers[-1].outputs
+                inpsh=self.layers[-1].output_shape
+            elif source=="inputs":
+                inp=self.input_placeholder
+                inpsh=self.input_shape
+            else:
+                ind=self.layer_names.index(source)
+                inp=self.layers[ind].outputs
+                inpsh=self.layers[ind].output_shape
+        else:
+            assert isinstance(source, tuple) or isinstance(source, list), "Need a tuple or a list of sources for JoinLayer"
+            inp=[]
+            inpsh=[]
+            for elem in source:
+                if elem==-1:
+                    inp.append(self.layers[-1].outputs)
+                    inpsh.append(self.layers[-1].output_shape)
+                elif elem=="inputs":
+                    inp.append(self.input_placeholder)
+                    inpsh.append(self.input_shape)
+                else:
+                    ind=self.layer_names.index(elem)
+                    inp.append(self.layers[ind].outputs)
+                    inpsh.append(self.layers[ind].output_shape)
+
+        layer.build(inp, inpsh, self.is_training)
+        self.layers.append(layer)
+        self.layer_names.append(layer.name)
+        self.L1 = self.L1 + layer.L1
+        self.L2 = self.L2 + layer.L2
+        self.params = self.params + layer.params
+        self.updates = self.updates + layer.updates
+
 
     def build_optimizer(self, optimizer):
         """
         Build an optimizer for this model
         :param optimizer: The optimizer to be built
         """
-        optimizer.build(self.params, self.updates, self.input_placeholder, self.layers[len(self.layers)-1].outputs, self.L1, self.L2)
+        optimizer.build(self.params, self.updates, self.input_placeholder, self.layers[-1].outputs, self.L1, self.L2)
 
     def get_runner(self, test_input, test_output):
         """
