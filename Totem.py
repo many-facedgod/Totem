@@ -7,36 +7,20 @@ from sklearn.metrics import roc_auc_score
 import pickle
 import theano.ifelse
 
-_floatX=theano.config.floatX
-activations={"sigmoid":T.nnet.sigmoid, "relu": T.nnet.relu, "tanh": T.tanh, "softmax": T.nnet.softmax, "None": lambda x: x, None: lambda x: x}
-tensors=[T.scalar, T.vector, T.matrix, T.tensor3, T.tensor4]
+_floatX = theano.config.floatX
+activations = {"sigmoid": T.nnet.sigmoid, "relu": T.nnet.relu, "tanh": T.tanh, "softmax": T.nnet.softmax,
+               "None": lambda x: x, None: lambda x: x}
+tensors = [T.scalar, T.vector, T.matrix, T.tensor3, T.tensor4]
 
 
 def floatX(x):
-    '''
+    """
     Converts the given scalar/ndarray to theano.config.floatX
     :param x: the scalar/ndarray
     :return: the typecasted value
-    '''
+    """
     return np.cast[_floatX](x)
 
-def increment(X, inc):
-    """
-    Returns an update tuple to increment a particular shared tensor
-    :param X: The shared tensor
-    :param inc: The increment value
-    :return: The update tuple
-    """
-    return (X, X+inc)
-
-def decrement(X, dec):
-    """
-    Returns an update tuple to decrement a particular shared tensor
-    :param X: The shared tensor
-    :param dec: The decrement value
-    :return: The update tuple
-    """
-    return (X, X-dec)
 
 def exp_avg(X_curr, X_new, momentum):
     """
@@ -46,7 +30,7 @@ def exp_avg(X_curr, X_new, momentum):
     :param momentum: The momentum to be used
     :return: The update tuple
     """
-    return (X_curr, X_curr*momentum+X_new*(1-momentum))
+    return X_curr, X_curr * momentum + X_new * (1 - momentum)
 
 
 def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03, mode="low_mem"):
@@ -62,36 +46,37 @@ def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03, mode="low_mem"):
     :return: Tensor representing the normalized input
     """
 
-    stddev=T.sqrt(variance + epsilon)
+    stddev = T.sqrt(variance + epsilon)
     return T.nnet.bn.batch_normalization(X, gamma, beta, mean, stddev, mode)
 
 
-def conv2d(image, filter, image_shape, filter_shape, strides = (1,1), mode="valid"):
+def conv2d(image, filter, image_shape, filter_shape, strides=(1, 1), mode="valid"):
     """
     Returns a 2D convolution of the image with the filter
     :param image: A 4D tensor of the shape (batch_size, channels, height, width)
     :param filter: A 4D tensor representing the filters
     :param image_shape: Tuple having the last 3 dimensions of the image (not including batch size)
     :param filter_shape: Tuple having the filter size
-    :param strides: The subsampling strides
+    :param strides: The sub-sampling strides
     :param mode: The padding mode: "valid",  "full"
     :return: (The output of the convolution, The shape of the output (if possible) without the batch_size)
     """
-    modes={"valid": (0, 0), "half": (filter_shape[2] // 2, filter_shape[3] // 2), "full": (filter_shape[2] - 1, filter_shape[3] -1), "same": (filter_shape[2] // 2, filter_shape[3] // 2)}
+    modes = {"valid": (0, 0), "half": (filter_shape[2] // 2, filter_shape[3] // 2),
+             "full": (filter_shape[2] - 1, filter_shape[3] - 1), "same": (filter_shape[2] // 2, filter_shape[3] // 2)}
 
-    if type(mode)==str:
-        padding=modes[mode]
+    if type(mode) == str:
+        padding = modes[mode]
     else:
-        padding=mode
+        padding = mode
 
-    if type(strides)==int:
-        strides=(strides, strides)
+    if type(strides) == int:
+        strides = (strides, strides)
 
-    result=T.nnet.conv2d(image, filter, input_shape=(None, ) + image_shape, filter_shape=filter_shape, border_mode=padding, subsample=strides)
-    op_shape=(filter_shape[0], ((image_shape[1] + 2 * padding[0] - filter_shape[2]) // strides[0]) + 1, ((image_shape[2] + 2 * padding[1] - filter_shape[3]) // strides[1]) + 1)
-    return (result, op_shape)
-
-
+    result = T.nnet.conv2d(image, filter, input_shape=(None,) + image_shape, filter_shape=filter_shape,
+                           border_mode=padding, subsample=strides)
+    op_shape = (filter_shape[0], ((image_shape[1] + 2 * padding[0] - filter_shape[2]) // strides[0]) + 1,
+                ((image_shape[2] + 2 * padding[1] - filter_shape[3]) // strides[1]) + 1)
+    return result, op_shape
 
 
 def pool(image, image_shape, ds, mode="max"):
@@ -103,24 +88,26 @@ def pool(image, image_shape, ds, mode="max"):
     :param mode: "max", "avg", "sum"
     :return: The downscaled image and the shape of it without the batch_size
     """
-    if mode=="avg":
-        mode="average_inc_pad"
-    result=T.signal.pool.pool_2d(image, ds, ignore_border=True, mode=mode)
-    op_shape=(image_shape[0], image_shape[1]//ds[0], image_shape[2]//ds[1])
-    return (result, op_shape)
+    if mode == "avg":
+        mode = "average_inc_pad"
+    result = T.signal.pool.pool_2d(image, ds, ignore_border=True, mode=mode)
+    op_shape = (image_shape[0], image_shape[1] // ds[0], image_shape[2] // ds[1])
+    return result, op_shape
 
 
 def categorical_crossentropy(Y_true, Y_pred, one_hot=False, epsilon=1e-15):
     """
     Cross-entropy loss useful for multi-class classifications, i.e., where the output vector represents sums to one.
     If one_hot is True, then the Y_true for each example is expected to be a vector with probability for each class.
-    If one_hot is False, then the Y_true for for each example is expected to be a single integer value representing the class number
+    If one_hot is False, then the Y_true for for each example is expected to be a single integer value representing the
+    class number
 
     Note: Y_true and Y_pred are expected to be a collection of such vectors (representing a batch)
 
     :param Y_true: The ground truth
     :param Y_pred: The output predicted by the model
     :param one_hot: Flag that determines how Y_true is encoded
+    :param epsilon: The clipping factor for the log function
     :return: Tensor representing the loss.
     """
     if not one_hot:
@@ -128,19 +115,22 @@ def categorical_crossentropy(Y_true, Y_pred, one_hot=False, epsilon=1e-15):
     else:
         return T.mean(T.nnet.categorical_crossentropy(Y_pred, Y_true))
 
+
 def mean_squared_error(Y_true, Y_pred, one_hot=True):
     """
     Returns the mean squared error between the true outputs and the predicted outputs
 
     :param Y_true: The ground truth (must be one-hot if classification)
     :param Y_pred:  The output predicted by the model
+    :param one_hot: Whether Y_true is one-hot or not. Non one-hot not supported.
     :return: Tensor representing the loss
     """
 
     if not one_hot:
-        raise ValueError ("Not implemented")
+        raise ValueError("Not implemented")
 
-    return T.mean(T.square(Y_true-Y_pred))
+    return T.mean(T.square(Y_true - Y_pred))
+
 
 def binary_crossentropy(Y_true, Y_pred, one_hot=True):
     """
@@ -150,9 +140,10 @@ def binary_crossentropy(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError ("Not implemented")
+        raise ValueError("Not implemented")
 
     return T.mean(T.nnet.binary_crossentropy(Y_pred, Y_true))
+
 
 def mean_absolute_error(Y_true, Y_pred, one_hot=True):
     """
@@ -163,22 +154,23 @@ def mean_absolute_error(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError ("Not implemented")
+        raise ValueError("Not implemented")
 
-    return T.mean(T.abs_(Y_true-Y_pred))
+    return T.mean(T.abs_(Y_true - Y_pred))
 
 
+objectives = {"cce": categorical_crossentropy, "mse": mean_squared_error, "bce": binary_crossentropy,
+              "mae": mean_absolute_error}
 
-objectives = {"cce":categorical_crossentropy, "mse": mean_squared_error, "bce": binary_crossentropy, "mae": mean_absolute_error}
 
 class RNG:
     """
     Wrapper around numpy's random number generated
     """
-    def __init__(self, seed):
-        self.np_rng=np.random.RandomState(seed)
-        self.th_rng=T.shared_randomstreams.RandomStreams(seed)
 
+    def __init__(self, seed):
+        self.np_rng = np.random.RandomState(seed)
+        self.th_rng = T.shared_randomstreams.RandomStreams(seed)
 
     def random(self, dtype=_floatX):
         """
@@ -199,11 +191,11 @@ class RNG:
         :param dtype:
         :return:
         """
-        low = mean - stddev*np.sqrt(3)
-        high = mean + stddev*np.sqrt(3)
-        return self.np_rng.uniform(low = low, high = high, size = shape).astype(dtype)
+        low = mean - stddev * np.sqrt(3)
+        high = mean + stddev * np.sqrt(3)
+        return self.np_rng.uniform(low=low, high=high, size=shape).astype(dtype)
 
-    def get_weights(self, shape, distribution = "normal", method = "glorot", mode="FC", scale="relu", dtype=_floatX):
+    def get_weights(self, shape, distribution="normal", method="glorot", mode="FC", scale="relu", dtype=_floatX):
         """
         Returns a numpy ndarray of weights with Glorot style initialization
         :param shape: Shape of the required weight matrix (a tuple)
@@ -214,29 +206,28 @@ class RNG:
         """
         distributions = {"normal": self.Gaussian, "gaussian": self.Gaussian, "uniform": self.Uniform}
 
-        if scale=="sigmoid":
-            z=4
+        if scale == "sigmoid":
+            z = 4
         else:
-            z=1
+            z = 1
 
-        if mode=="FC":
-            fan_in=shape[0]
-            fan_out=shape[1]
-        elif mode=="CONV":
-            fan_in=shape[1]*shape[2]*shape[3]
-            fan_out=shape[0]*shape[2]*shape[3]
+        if mode == "FC":
+            fan_in = shape[0]
+            fan_out = shape[1]
+        elif mode == "CONV":
+            fan_in = shape[1] * shape[2] * shape[3]
+            fan_out = shape[0] * shape[2] * shape[3]
         else:
-            raise ValueError ("Unrecognized mode")
+            raise ValueError("Unrecognized mode")
 
-        if method=="glorot":
-            stddev=np.sqrt(2.0 / ( fan_in + fan_out))
-        elif method=="he":
-            stddev=np.sqrt(2.0 / (fan_in))
+        if method == "glorot":
+            stddev = np.sqrt(2.0 / (fan_in + fan_out))
+        elif method == "he":
+            stddev = np.sqrt(2.0 / fan_in)
         else:
-            raise ValueError ("Not supported")
+            raise ValueError("Not supported")
 
-        return z*(distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
-
+        return z * (distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
 
     def Orthogonal(self, shape, mode="FC", scale="relu", dtype=_floatX):
         """
@@ -247,21 +238,21 @@ class RNG:
         :param dtype: The data type of the output array
         :return: The generated weights
         """
-        if scale=="relu":
-            z=np.sqrt(2)
-        elif scale=="sigmoid":
-            z=4
+        if scale == "relu":
+            z = np.sqrt(2)
+        elif scale == "sigmoid":
+            z = 4
         else:
-            z=1
+            z = 1
 
-        if mode=="FC":
-            sample=self.np_rng.normal(size=shape)
-            U,_,_=np.linalg.svd(sample)
-            weights=(z*U).astype(dtype)
-        elif mode=="CONV":
-            sample=self.np_rng.normal(size=(shape[0], shape[1]*shape[2]*shape[3]))
-            _,_,V=np.linalg.svd(sample)
-            weights=(z*V).astype(type).reshape(shape)
+        if mode == "FC":
+            sample = self.np_rng.normal(size=shape)
+            U, _, _ = np.linalg.svd(sample)
+            weights = (z * U[:, :shape[1]]).astype(dtype)
+        elif mode == "CONV":
+            sample = self.np_rng.normal(size=(shape[0], shape[1] * shape[2] * shape[3]))
+            _, _, V = np.linalg.svd(sample)
+            weights = (z * V[:shape[0], :]).astype(type).reshape(shape)
         else:
             raise TypeError
         return weights
@@ -273,7 +264,7 @@ class RNG:
         :param keep_prob: The probability of keeping the element
         :return: A tensor that serves as a mask for a dropout layer.
         """
-        mask=self.th_rng.binomial(shape, p=keep_prob, dtype=dtype)/np.cast[dtype](keep_prob)
+        mask = self.th_rng.binomial(shape, p=keep_prob, dtype=dtype) / np.cast[dtype](keep_prob)
         return mask
 
     def SymbolicShuffle(self, X, size=None):
@@ -283,7 +274,7 @@ class RNG:
         :param size: The size of the leftmost dimension, if known
         :return: The shuffled view of the tensor
         """
-        if size==None:
+        if size is None:
             return X[self.th_rng.permutation(n=X.shape[0])]
         else:
             return X[self.th_rng.permutation(n=size)]
@@ -296,33 +287,32 @@ class RNG:
         self.np_rng.shuffle(x)
 
 
-
-
 class Layer:
     """
     Abstract class for the layer interface
     """
+
     def __init__(self, name):
-        self.params=[]
-        self.inputs=None
-        self.outputs=None
-        self.input_shape=None
-        self.output_shape=None
-        self.updates=[]
-        self.L1=T.constant(0.0)
-        self.L2=T.constant(0.0)
-        self.is_training=None
-        self.name=name
+        self.params = []
+        self.inputs = None
+        self.outputs = None
+        self.input_shape = None
+        self.output_shape = None
+        self.updates = []
+        self.L1 = T.constant(0.0)
+        self.L2 = T.constant(0.0)
+        self.is_training = None
+        self.name = name
 
     def build(self, inputs, input_shape, is_training):
         return None
 
 
-
 class JoinLayer(Layer):
     """
-    This layer concatenates the input of two layers.
+    This layer concatenates the input of two or more layers.
     """
+
     def __init__(self, name, axis):
         """
         Constructor
@@ -330,7 +320,7 @@ class JoinLayer(Layer):
         :param axis: Axis along which concatenation is to happen. Note that the batch axis is 0.
         """
         Layer.__init__(self, name)
-        self.axis=axis
+        self.axis = axis
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -340,23 +330,22 @@ class JoinLayer(Layer):
         :param is_training: Whether the model is training or not
         :return:
         """
-        self.inputs=inputs
-        self.input_shape=input_shape
-        self.is_training=is_training
-        self.outputs=T.concatenate(inputs, axis=self.axis)
-        if self.axis==0:
-            self.output_shape=self.input_shape[0]
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.is_training = is_training
+        self.outputs = T.concatenate(inputs, axis=self.axis)
+        if self.axis == 0:
+            self.output_shape = self.input_shape[0]
         else:
-            sum=np.sum(self.input_shape, axis=0)[self.axis-1]
-            self.output_shape=tuple([x if ind!=(self.axis -1) else sum for ind, x in enumerate(input_shape[0])])
-
+            sum = np.sum(self.input_shape, axis=0)[self.axis - 1]
+            self.output_shape = tuple([x if ind != (self.axis - 1) else sum for ind, x in enumerate(input_shape[0])])
 
 
 class FCLayer(Layer):
-
     """
     A layer implementing f(Wx+b)
     """
+
     def __init__(self, name, n_units, rng, activation="relu", init_method="glorot"):
         """
         Constructor
@@ -366,11 +355,12 @@ class FCLayer(Layer):
         :param activation: The name of the activation function to be used
         """
         Layer.__init__(self, name)
-        self.n_units=n_units
-        self.rng=rng
-        self.activation=activation
-        self.init_method=init_method
-
+        self.n_units = n_units
+        self.rng = rng
+        self.activation = activation
+        self.init_method = init_method
+        self.weights = None
+        self.bias = None
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -379,17 +369,18 @@ class FCLayer(Layer):
         :param input_shape: The shape of the inputs as a tuple (not including batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape=input_shape
-        self.is_training=is_training
-        self.output_shape=(self.n_units, )
-        self.weights=theano.shared(self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method, mode="FC", scale=self.activation, dtype=_floatX) , borrow=True)
-        self.bias=theano.shared(np.zeros(self.n_units, dtype=_floatX), borrow=True)
-        self.inputs=inputs
-        self.outputs=activations[self.activation](T.dot(self.inputs, self.weights)+self.bias)
-        self.params=[self.weights, self.bias]
-        self.L1=T.sum(T.abs_(self.weights))+T.sum(T.abs_(self.bias))
-        self.L2=T.sum(T.square(self.weights))+T.sum(T.square(self.bias))
-
+        self.input_shape = input_shape
+        self.is_training = is_training
+        self.output_shape = (self.n_units,)
+        self.weights = theano.shared(
+            self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method,
+                                 mode="FC", scale=self.activation, dtype=_floatX), borrow=True)
+        self.bias = theano.shared(np.zeros(self.n_units, dtype=_floatX), borrow=True)
+        self.inputs = inputs
+        self.outputs = activations[self.activation](T.dot(self.inputs, self.weights) + self.bias)
+        self.params = [self.weights, self.bias]
+        self.L1 = T.sum(T.abs_(self.weights)) + T.sum(T.abs_(self.bias))
+        self.L2 = T.sum(T.square(self.weights)) + T.sum(T.square(self.bias))
 
 
 class ConvLayer(Layer):
@@ -397,7 +388,8 @@ class ConvLayer(Layer):
     A layer implementing a convolution on images
     """
 
-    def __init__(self, name, filter_num, filter_size, rng, activation="relu", mode="valid", strides=(1,1), init_method="glorot"):
+    def __init__(self, name, filter_num, filter_size, rng, activation="relu", mode="valid", strides=(1, 1),
+                 init_method="glorot"):
         """
         Constructor for a convolution layer
         :param name: The name of this layer. Not optional.
@@ -408,13 +400,16 @@ class ConvLayer(Layer):
         :param mode: Convolution padding mode
         """
         Layer.__init__(self, name)
-        self.filter_num=filter_num
-        self.filter_size=filter_size
-        self.rng=rng
-        self.activation=activation
-        self.mode=mode
-        self.init_method=init_method
-        self.strides=strides
+        self.filter_num = filter_num
+        self.filter_size = filter_size
+        self.rng = rng
+        self.activation = activation
+        self.mode = mode
+        self.init_method = init_method
+        self.strides = strides
+        self.filter = None
+        self.filter_shape = None
+        self.bias = None
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -423,25 +418,27 @@ class ConvLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape=input_shape
-        self.inputs=inputs
-        self.is_training=is_training
-        self.filter_shape=(self.filter_num, input_shape[0])+ self.filter_size
-        self.filter=theano.shared(self.rng.get_weights(self.filter_shape, distribution="normal", method=self.init_method, mode="CONV", scale=self.activation, dtype=_floatX), borrow=True)
-        self.bias=theano.shared(np.zeros(self.filter_num, dtype=_floatX), borrow=True)
-        conv, shape=conv2d(inputs, self.filter, input_shape, self.filter_shape, mode=self.mode, strides=self.strides)
-        self.outputs=activations[self.activation](conv+ self.bias.dimshuffle('x',0,'x','x'))
-        self.params=[self.filter, self.bias]
-        self.L1=T.sum(T.abs_(self.filter))+T.sum(T.abs_(self.bias))
-        self.L2=T.sum(T.square(self.filter))+T.sum(T.square(self.bias))
-        self.output_shape=shape
-
+        self.input_shape = input_shape
+        self.inputs = inputs
+        self.is_training = is_training
+        self.filter_shape = (self.filter_num, input_shape[0]) + self.filter_size
+        self.filter = theano.shared(
+            self.rng.get_weights(self.filter_shape, distribution="normal", method=self.init_method, mode="CONV",
+                                 scale=self.activation, dtype=_floatX), borrow=True)
+        self.bias = theano.shared(np.zeros(self.filter_num, dtype=_floatX), borrow=True)
+        conv, shape = conv2d(inputs, self.filter, input_shape, self.filter_shape, mode=self.mode, strides=self.strides)
+        self.outputs = activations[self.activation](conv + self.bias.dimshuffle('x', 0, 'x', 'x'))
+        self.params = [self.filter, self.bias]
+        self.L1 = T.sum(T.abs_(self.filter)) + T.sum(T.abs_(self.bias))
+        self.L2 = T.sum(T.square(self.filter)) + T.sum(T.square(self.bias))
+        self.output_shape = shape
 
 
 class PoolLayer(Layer):
     """
     A layer implementing 2D pooling
     """
+
     def __init__(self, name, down_sample_size, mode="max"):
         """
         Constructor for the layer
@@ -450,8 +447,8 @@ class PoolLayer(Layer):
         :param mode: Mode for pooling: "max", "avg"
         """
         Layer.__init__(self, name)
-        self.down_sample_size=down_sample_size
-        self.mode=mode
+        self.down_sample_size = down_sample_size
+        self.mode = mode
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -460,17 +457,17 @@ class PoolLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape=input_shape
-        self.inputs=inputs
-        self.is_training=is_training
-        self.outputs, self.output_shape=pool(inputs, input_shape, self.down_sample_size, self.mode)
-
+        self.input_shape = input_shape
+        self.inputs = inputs
+        self.is_training = is_training
+        self.outputs, self.output_shape = pool(inputs, input_shape, self.down_sample_size, self.mode)
 
 
 class ActLayer(Layer):
     """
     A layer representing just an activation function
     """
+
     def __init__(self, name, activation):
         """
         Constructor for the layer
@@ -478,7 +475,7 @@ class ActLayer(Layer):
         :param activation: The activation function
         """
         Layer.__init__(self, name)
-        self.activation=activation
+        self.activation = activation
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -487,13 +484,11 @@ class ActLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs=inputs
-        self.input_shape=input_shape
-        self.is_training=is_training
-        self.outputs=activations[self.activation](self.inputs)
-        self.output_shape=input_shape
-
-
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.is_training = is_training
+        self.outputs = activations[self.activation](self.inputs)
+        self.output_shape = input_shape
 
 
 class ReshapeLayer(Layer):
@@ -508,7 +503,7 @@ class ReshapeLayer(Layer):
         :param new_shape: The new shape. Must be compatible.
         """
         Layer.__init__(self, name)
-        self.output_shape=new_shape
+        self.output_shape = new_shape
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -518,10 +513,9 @@ class ReshapeLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs=inputs
-        self.input_shape=input_shape
-        self.outputs=T.reshape(inputs, (inputs.shape[0], )+self.output_shape, ndim=len(self.output_shape)+1)
-
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.outputs = T.reshape(inputs, (inputs.shape[0],) + self.output_shape, ndim=len(self.output_shape) + 1)
 
 
 class DropOutLayer(Layer):
@@ -537,8 +531,8 @@ class DropOutLayer(Layer):
         :param keep_prob: The probability of a signal to remain uncorrupted
         """
         Layer.__init__(self, name)
-        self.rng=rng
-        self.keep_prob=keep_prob
+        self.rng = rng
+        self.keep_prob = keep_prob
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -547,11 +541,14 @@ class DropOutLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape=input_shape
-        self.output_shape=input_shape
-        self.is_training=is_training
-        self.inputs=inputs
-        self.outputs=theano.ifelse.ifelse(is_training, inputs*self.rng.DropoutMask(shape=input_shape, keep_prob=self.keep_prob), inputs)
+        self.input_shape = input_shape
+        self.output_shape = input_shape
+        self.is_training = is_training
+        self.inputs = inputs
+        self.outputs = theano.ifelse.ifelse(is_training,
+                                            inputs * self.rng.DropoutMask(shape=input_shape, keep_prob=self.keep_prob),
+                                            inputs)
+
 
 class FlattenLayer(Layer):
     """
@@ -565,19 +562,18 @@ class FlattenLayer(Layer):
         """
         Layer.__init__(self, name)
 
-    def build(self, inputs, input_shape,is_training):
+    def build(self, inputs, input_shape, is_training):
         """
         Building the actual layer
         :param inputs: The inputs to the layer
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs=inputs
-        self.input_shape=input_shape
-        self.is_training=is_training
-        self.outputs=T.flatten(inputs, 2)
-        self.output_shape= (np.prod(input_shape),)
-
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.is_training = is_training
+        self.outputs = T.flatten(inputs, 2)
+        self.output_shape = (np.prod(input_shape),)
 
 
 class BNLayer(Layer):
@@ -594,13 +590,13 @@ class BNLayer(Layer):
         :param mode: The mode for theano's batch normalization function: "low_mem" or "high_mem" Recommended is low_mem.
         """
         Layer.__init__(self, name)
-        self.epsilon=epsilon
-        self.momentum=momentum
-        self.mode=mode
-        self.mean=None
-        self.var=None
-        self.gamma=None
-        self.beta=None
+        self.epsilon = epsilon
+        self.momentum = momentum
+        self.mode = mode
+        self.mean = None
+        self.var = None
+        self.gamma = None
+        self.beta = None
 
     def build(self, inputs, input_shape, is_training):
         """
@@ -609,21 +605,26 @@ class BNLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs=inputs
-        self.input_shape=input_shape
-        self.is_training=is_training
-        self.mean=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
-        self.var=theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
-        self.gamma=theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
-        self.beta=theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
-        cur_mean=T.mean(inputs, axis=0)
-        cur_var=T.var(inputs, axis=0)
-        self.outputs=theano.ifelse.ifelse(is_training, BNormalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta, self.epsilon, self.mode), BNormalize(self.inputs, self.mean, self.var, self.gamma, self.beta, self.epsilon, self.mode))
-        self.output_shape=self.input_shape
-        self.params=[self.gamma, self.beta]
-        self.updates=[exp_avg(self.mean, cur_mean, self.momentum), exp_avg(self.var, cur_var, self.momentum)]
-        self.L1=T.sum(T.abs_(self.gamma))+ T.sum(T.abs_(self.beta))
-        self.L2=T.sum(T.square(self.gamma))+T.sum(T.square(self.beta))
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.is_training = is_training
+        self.mean = theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
+        self.var = theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
+        self.gamma = theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
+        self.beta = theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
+        cur_mean = T.mean(inputs, axis=0)
+        cur_var = T.var(inputs, axis=0)
+        self.outputs = theano.ifelse.ifelse(is_training,
+                                            BNormalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta,
+                                                       self.epsilon, self.mode),
+                                            BNormalize(self.inputs, self.mean, self.var, self.gamma, self.beta,
+                                                       self.epsilon, self.mode))
+        self.output_shape = self.input_shape
+        self.params = [self.gamma, self.beta]
+        self.updates = [exp_avg(self.mean, cur_mean, self.momentum), exp_avg(self.var, cur_var, self.momentum)]
+        self.L1 = T.sum(T.abs_(self.gamma)) + T.sum(T.abs_(self.beta))
+        self.L2 = T.sum(T.square(self.gamma)) + T.sum(T.square(self.beta))
+
 
 class Optimizer:
     """
@@ -631,25 +632,23 @@ class Optimizer:
     """
 
     def __init__(self, cost, one_hot, data_input, data_output, L1=None, L2=None):
-
-        self.model_params=None
-        self.model_grads=None
-        self.layer_updates=None
-        self.train_step=None
-        self.model_inputs=None
-        self.model_outputs=None
-        self.cost_function=cost
-        self.truth_placeholder=None
-        self.one_hot=one_hot
-        self.cost=None
-        self.updates=None
-        self.data_input=theano.shared(np.asarray(data_input, dtype=_floatX), borrow=True, name="Train_Input")
-        self.data_output=theano.shared(np.asarray(data_output, dtype=_floatX), borrow=True, name="Train_Output")
-        self.L1=L1
-        self.L2=L2
+        self.model_params = None
+        self.model_grads = None
+        self.layer_updates = None
+        self.train_step = None
+        self.model_inputs = None
+        self.model_outputs = None
+        self.cost_function = cost
+        self.truth_placeholder = None
+        self.one_hot = one_hot
+        self.cost = None
+        self.updates = None
+        self.data_input = theano.shared(np.asarray(data_input, dtype=_floatX), borrow=True, name="Train_Input")
+        self.data_output = theano.shared(np.asarray(data_output, dtype=_floatX), borrow=True, name="Train_Output")
+        self.L1 = L1
+        self.L2 = L2
 
     def build(self, model_params, layer_updates, model_inputs, model_outputs, L1_val, L2_val):
-
         return None
 
     def set_value(self, data_input, data_output):
@@ -660,6 +659,7 @@ class Optimizer:
         """
         self.data_input.set_value(np.asarray(data_input, dtype=_floatX))
         self.data_output.set_value(np.asarray(data_output, dtype=_floatX))
+
 
 class SGD(Optimizer):
     """
@@ -677,7 +677,7 @@ class SGD(Optimizer):
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot else (training_samples, number_of_classes)
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
-        self.learning_rate=learning_rate
+        self.learning_rate = learning_rate
 
     def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
         """
@@ -687,22 +687,28 @@ class SGD(Optimizer):
         :param layer_updates: The updates required for proper functioning of the layers
         :param model_inputs: The input_placeholder of the model
         :param model_outputs: The outputs of the model
+        :param l1_val: The actual L1 value of params
+        :param l2_val: The actual L2 value of params
         """
-        self.model_params=model_params
-        self.layer_updates=layer_updates
-        self.model_inputs=model_inputs
-        self.model_outputs=model_outputs
-        self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
-        self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
-        cost_regular=self.cost
+        self.model_params = model_params
+        self.layer_updates = layer_updates
+        self.model_inputs = model_inputs
+        self.model_outputs = model_outputs
+        self.truth_placeholder = T.vector() if not self.one_hot else T.matrix()
+        self.cost = objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
+        cost_regular = self.cost
         if self.L1 is not None:
-            cost_regular=cost_regular+self.L1*l1_val
+            cost_regular = cost_regular + self.L1 * l1_val
         if self.L2 is not None:
-            cost_regular=cost_regular+self.L2*l2_val
-        self.model_grads=T.grad(cost_regular, wrt=self.model_params)
-        self.updates=[(param_i, param_i-self.learning_rate*grad_i) for (param_i, grad_i) in zip(self.model_params, self.model_grads)]+self.layer_updates
-        indices=T.lvector()
-        self.train_step=theano.function([indices], self.cost, updates=self.updates, givens={self.model_inputs: self.data_input[indices], self.truth_placeholder: self.data_output[indices]})
+            cost_regular = cost_regular + self.L2 * l2_val
+        self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        self.updates = [(param_i, param_i - self.learning_rate * grad_i) for (param_i, grad_i) in
+                        zip(self.model_params, self.model_grads)] + self.layer_updates
+        indices = T.lvector()
+        self.train_step = theano.function([indices], self.cost, updates=self.updates,
+                                          givens={self.model_inputs: self.data_input[indices],
+                                                  self.truth_placeholder: self.data_output[indices]})
+
 
 class SGD_momentum(Optimizer):
     """
@@ -721,8 +727,8 @@ class SGD_momentum(Optimizer):
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot else (training_samples, number of classes)
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
-        self.learning_rate=learning_rate
-        self.momentum=momentum
+        self.learning_rate = learning_rate
+        self.momentum = momentum
 
     def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
         """
@@ -732,31 +738,38 @@ class SGD_momentum(Optimizer):
         :param layer_updates: The updates required for proper functioning of the layers
         :param model_inputs: The input_placeholder of the model
         :param model_outputs: The outputs of the model
+        :param l1_val: The actual L1 value of params
+        :param l2_val: The actual L2 value of params
         """
-        self.model_params=model_params
-        self.layer_updates=layer_updates
-        self.model_inputs=model_inputs
-        self.model_outputs=model_outputs
-        self.truth_placeholder=T.vector() if not self.one_hot else T.matrix()
-        self.cost=objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
-        cost_regular=self.cost
+        self.model_params = model_params
+        self.layer_updates = layer_updates
+        self.model_inputs = model_inputs
+        self.model_outputs = model_outputs
+        self.truth_placeholder = T.vector() if not self.one_hot else T.matrix()
+        self.cost = objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
+        cost_regular = self.cost
         if self.L1 is not None:
-            cost_regular=cost_regular+self.L1*l1_val
+            cost_regular = cost_regular + self.L1 * l1_val
         if self.L2 is not None:
-            cost_regular=cost_regular+self.L2*l2_val
-        self.model_grads=T.grad(cost_regular, wrt=self.model_params)
-        old_deltas=[theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
-        new_deltas=[-self.learning_rate*grad_i+self.momentum*old_i for (grad_i, old_i) in zip(self.model_grads, old_deltas)]
-        self.updates=[(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)]+[(old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)]+self.layer_updates
-        indices=T.lvector()
-        self.train_step=theano.function([indices], self.cost, updates=self.updates, givens={self.model_inputs: self.data_input[indices], self.truth_placeholder: self.data_output[indices]})
-
+            cost_regular = cost_regular + self.L2 * l2_val
+        self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        old_deltas = [theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in
+                      self.model_params]
+        new_deltas = [-self.learning_rate * grad_i + self.momentum * old_i for (grad_i, old_i) in
+                      zip(self.model_grads, old_deltas)]
+        self.updates = [(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)] + [
+            (old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)] + self.layer_updates
+        indices = T.lvector()
+        self.train_step = theano.function([indices], self.cost, updates=self.updates,
+                                          givens={self.model_inputs: self.data_input[indices],
+                                                  self.truth_placeholder: self.data_output[indices]})
 
 
 class Runner:
     """
     Use the methods of this class to run the model
     """
+
     def __init__(self, input_placeholder, input_shape, model_outputs, is_training, test_input, test_output):
         """
         Constructor. To be called by the model "get_runner" method"
@@ -767,14 +780,14 @@ class Runner:
         :param test_input: The tensor containing the test input data
         :param test_output: The tensor containing the test output data (required to calculate errors)
         """
-        self.input_placeholder=input_placeholder
-        self.model_outputs=model_outputs
-        self.is_training=is_training
-        self.input_shape=input_shape
-        self.test_input=theano.shared(np.asarray(test_input, dtype=_floatX), borrow=True)
-        self.test_output=theano.shared(np.asarray(test_output, dtype=_floatX), borrow=True)
-        index=T.lvector()
-        self.run=theano.function([index], self.model_outputs, givens={self.input_placeholder: self.test_input[index]})
+        self.input_placeholder = input_placeholder
+        self.model_outputs = model_outputs
+        self.is_training = is_training
+        self.input_shape = input_shape
+        self.test_input = theano.shared(np.asarray(test_input, dtype=_floatX), borrow=True)
+        self.test_output = theano.shared(np.asarray(test_output, dtype=_floatX), borrow=True)
+        index = T.lvector()
+        self.run = theano.function([index], self.model_outputs, givens={self.input_placeholder: self.test_input[index]})
 
     def set_value(self, test_input, test_output):
         """
@@ -795,17 +808,16 @@ class Runner:
         """
 
         iters = int(np.ceil(self.test_input.shape[0].eval() / floatX(at_a_time)))
-        indices=np.arange(self.test_input.shape[0].eval())
-        op=np.asarray(self.run(indices[:at_a_time]))
-        for i in range(1,iters):
-            op=np.append(op, self.run(indices[i*at_a_time: (i+1)*at_a_time]), axis=0)
-        actual=np.asarray(self.test_output.get_value(), dtype=np.int32)
+        indices = np.arange(self.test_input.shape[0].eval())
+        op = np.asarray(self.run(indices[:at_a_time]))
+        for i in range(1, iters):
+            op = np.append(op, self.run(indices[i * at_a_time: (i + 1) * at_a_time]), axis=0)
+        actual = np.asarray(self.test_output.get_value(), dtype=np.int32)
         if one_hot:
-            threshed=np.clip(np.ceil(op-thresh), 0.0, 1.0).astype(np.int32)
+            threshed = np.clip(np.ceil(op - thresh), 0.0, 1.0).astype(np.int32)
             return np.mean(np.not_equal(threshed, actual))
         else:
             return np.mean(np.not_equal(np.argmax(op, axis=1), actual))
-
 
     def auc_score(self, mode="macro", at_a_time=20):
         """
@@ -824,34 +836,31 @@ class Runner:
         return roc_auc_score(actual, op, average=mode)
 
 
-
-
 class Model:
-
     def __init__(self, input_shape):
         """
         Constructor for a model
         :param input_shape: The shape of the expected input. (Not including batch_size)
         """
-        self.params=[]
-        self.layers=[]
-        self.layer_names=[]
-        self.updates=[]
-        self.input_shape=input_shape
-        self.input_placeholder=tensors[len(input_shape)+1]("input_placeholder")
-        self.is_training=theano.shared(1)
-        self.L1=T.constant(0.0)
-        self.L2=T.constant(0.0)
+        self.params = []
+        self.layers = []
+        self.layer_names = []
+        self.updates = []
+        self.input_shape = input_shape
+        self.input_placeholder = tensors[len(input_shape) + 1]("input_placeholder")
+        self.is_training = theano.shared(1)
+        self.L1 = T.constant(0.0)
+        self.L2 = T.constant(0.0)
 
     def change_is_training(self, mode):
         """
         Change the mode from training to running
         :param mode: True for training, False for running
         """
-        if mode==True:
-            mode=1
-        elif mode==False:
-            mode=0
+        if mode is True:
+            mode = 1
+        elif mode is False:
+            mode = 0
         self.is_training.set_value(mode)
 
     def add_layer(self, layer, source=-1):
@@ -862,35 +871,36 @@ class Model:
                         and "inputs" for the original. If the layer is a JoinLayer, use a tuple of names/-1/"inputs"
         """
 
-        if len(self.layers)==0:
+        if len(self.layers) == 0:
             assert not isinstance(layer, JoinLayer), "Cannot have JoinLayer as the first layer"
-            inp=self.input_placeholder
-            inpsh=self.input_shape
+            inp = self.input_placeholder
+            inpsh = self.input_shape
 
         elif not isinstance(layer, JoinLayer):
-            if source==-1:
-                inp=self.layers[-1].outputs
-                inpsh=self.layers[-1].output_shape
-            elif source=="inputs":
-                inp=self.input_placeholder
-                inpsh=self.input_shape
+            if source == -1:
+                inp = self.layers[-1].outputs
+                inpsh = self.layers[-1].output_shape
+            elif source == "inputs":
+                inp = self.input_placeholder
+                inpsh = self.input_shape
             else:
-                ind=self.layer_names.index(source)
-                inp=self.layers[ind].outputs
-                inpsh=self.layers[ind].output_shape
+                ind = self.layer_names.index(source)
+                inp = self.layers[ind].outputs
+                inpsh = self.layers[ind].output_shape
         else:
-            assert isinstance(source, tuple) or isinstance(source, list), "Need a tuple or a list of sources for JoinLayer"
-            inp=[]
-            inpsh=[]
+            assert isinstance(source, tuple) or isinstance(source,
+                                                           list), "Need a tuple or a list of sources for JoinLayer"
+            inp = []
+            inpsh = []
             for elem in source:
-                if elem==-1:
+                if elem == -1:
                     inp.append(self.layers[-1].outputs)
                     inpsh.append(self.layers[-1].output_shape)
-                elif elem=="inputs":
+                elif elem == "inputs":
                     inp.append(self.input_placeholder)
                     inpsh.append(self.input_shape)
                 else:
-                    ind=self.layer_names.index(elem)
+                    ind = self.layer_names.index(elem)
                     inp.append(self.layers[ind].outputs)
                     inpsh.append(self.layers[ind].output_shape)
 
@@ -901,7 +911,6 @@ class Model:
         self.L2 = self.L2 + layer.L2
         self.params = self.params + layer.params
         self.updates = self.updates + layer.updates
-
 
     def build_optimizer(self, optimizer):
         """
@@ -917,7 +926,8 @@ class Model:
         :param test_output: The test output data for the runner
         :return:
         """
-        return Runner(self.input_placeholder,self.input_shape, self.layers[len(self.layers)-1].outputs, self.is_training, test_input, test_output)
+        return Runner(self.input_placeholder, self.input_shape, self.layers[len(self.layers) - 1].outputs,
+                      self.is_training, test_input, test_output)
 
     def save(self, file):
         """
