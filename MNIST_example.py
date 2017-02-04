@@ -12,7 +12,7 @@ Vx, Vy=Valid
 n_batches=100
 batch_size=500
 x=Model((1,28,28))
-n_iters=15
+n_iters=50
 x.add_layer(ConvLayer("Conv1", 10, (3, 3), r, activation="relu", init_method="glorot"))
 x.add_layer(PoolLayer("Pool1", (2, 2), mode="max"))
 x.add_layer(ConvLayer("Conv2", 5, (3, 3), r, activation="relu", init_method="glorot"))
@@ -29,6 +29,7 @@ x.add_layer(ConvLayer("Conv5", 10, (2, 2), r))
 x.add_layer(ConvLayer("Conv6", 10, (2, 2), r))
 x.add_layer(FlattenLayer("Flat3"))
 x.add_layer(JoinLayer("Join1", axis=1), source=("Flat1", "Flat2", "Flat3"))
+x.add_layer(BNLayer("BN1"))
 x.add_layer(FCLayer("FC1", 400, r, "relu"))
 x.add_layer(FCLayer("FC2", 10, r, "softmax"))
 
