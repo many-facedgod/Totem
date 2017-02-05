@@ -342,8 +342,8 @@ class JoinLayer(Layer):
         if self.axis == 0:
             self.output_shape = self.input_shape[0]
         else:
-            sum = np.sum(self.input_shape, axis=0)[self.axis - 1]
-            self.output_shape = tuple([x if ind != (self.axis - 1) else sum for ind, x in enumerate(input_shape[0])])
+            total = np.sum(self.input_shape, axis=0)[self.axis - 1]
+            self.output_shape = tuple([x if ind != (self.axis - 1) else total for ind, x in enumerate(input_shape[0])])
 
 
 class FCLayer(Layer):
@@ -638,6 +638,9 @@ class Optimizer:
         self.L1 = L1
         self.L2 = L2
 
+    def calc_updates(self):
+        return None
+
     def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
         """
         Does the operations common to all optimizers
@@ -660,6 +663,8 @@ class Optimizer:
         if self.L2 is not None:
             cost_regular = cost_regular + self.L2 * l2_val
         self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        self.calc_updates()
+        self.get_train_step()
 
     def set_value(self, data_input, data_output):
         """
@@ -703,23 +708,15 @@ class AdaGrad(Optimizer):
         self.learning_rate = learning_rate
         self.epsilon = epsilon
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+    def calc_updates(self):
         """
-        Builds the actual AdaGrad optimizer
-        :param model_params: The parameters of the model
-        :param layer_updates: The updates that are required by layers apart from training
-        :param model_inputs: The model input tensor
-        :param model_outputs: The model outputs tensor
-        :param l1_val: The weight for L1 norm
-        :param l2_val: The weight for L2 norm
+        Calculates the updates for the AdaGrad optimizer
         """
-        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         accumulator = [theano.shared(np.zeros(x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
         new_acc = [acc + T.square(g) for acc, g in zip(accumulator, self.model_grads)]
         self.updates = [(param, param - self.learning_rate * g / (T.sqrt(acc) + self.epsilon)) for param, g, acc in
                         zip(self.model_params, self.model_grads, new_acc)] + [(acc, new) for acc, new in
                                                                               zip(accumulator, new_acc)]
-        self.get_train_step()
 
 
 class ADAM(Optimizer):
@@ -750,17 +747,10 @@ class ADAM(Optimizer):
         self.beta_2 = beta_2
         self.epsilon = epsilon
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+    def calc_updates(self):
         """
-        Builds the actual ADAM Optimizer
-        :param model_params: The parameters of the model
-        :param layer_updates: The updates that are required by layers apart from training
-        :param model_inputs: The model input tensor
-        :param model_outputs: The model outputs tensor
-        :param l1_val: The weight for L1 norm
-        :param l2_val: The weight for L2 norm
+        Calculates the update for the ADAM optimizer
         """
-        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         m_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
         v_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
         t = theano.shared(np.asarray(0, dtype=_floatX))
@@ -774,7 +764,6 @@ class ADAM(Optimizer):
                                                                                 zip(m_t, new_m)] + [(v, new) for v, new
                                                                                                     in zip(v_t,
                                                                                                            new_v)]
-        self.get_train_step()
 
 
 class SGD(Optimizer):
@@ -798,21 +787,12 @@ class SGD(Optimizer):
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
         self.learning_rate = learning_rate
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+    def calc_updates(self):
         """
-        Building the actual optimizer. To be called by the model's build_optimizer method
-
-        :param model_params: The parameters of the model
-        :param layer_updates: The updates required for proper functioning of the layers
-        :param model_inputs: The input_placeholder of the model
-        :param model_outputs: The outputs of the model
-        :param l1_val: The actual L1 value of params
-        :param l2_val: The actual L2 value of params
+        Calculates the updates for the SGD optimizer.
         """
-        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         self.updates = [(param_i, param_i - self.learning_rate * grad_i) for (param_i, grad_i) in
                         zip(self.model_params, self.model_grads)]
-        self.get_train_step()
 
 
 class SGDMomentum(Optimizer):
@@ -837,25 +817,16 @@ class SGDMomentum(Optimizer):
         self.learning_rate = learning_rate
         self.momentum = momentum
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+    def calc_updates(self):
         """
-        Building the actual optimizer. To be called by the model's build_optimizer method
-
-        :param model_params: The parameters of the model
-        :param layer_updates: The updates required for proper functioning of the layers
-        :param model_inputs: The input_placeholder of the model
-        :param model_outputs: The outputs of the model
-        :param l1_val: The actual L1 value of params
-        :param l2_val: The actual L2 value of params
+        Calculates the updates for the SGDMomentum optimizer.
         """
-        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         old_deltas = [theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in
                       self.model_params]
         new_deltas = [-self.learning_rate * grad_i + self.momentum * old_i for (grad_i, old_i) in
                       zip(self.model_grads, old_deltas)]
         self.updates = [(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)] + [
             (old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)]
-        self.get_train_step()
 
 
 class Runner:
@@ -1046,9 +1017,9 @@ class Model:
         self.change_is_training(curr_mode)
         return op
 
-    def save(self, file):
+    def save(self, f):
         """
         Save the model to a file
-        :param file: The file object to which it is to be written
+        :param f: The file object to which it is to be written
         """
-        pickle.dump(self, file, protocol=-1)
+        pickle.dump(self, f, protocol=-1)
