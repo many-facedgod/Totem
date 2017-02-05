@@ -307,7 +307,9 @@ class Layer:
         self.name = name
 
     def build(self, inputs, input_shape, is_training):
-        return None
+        self.inputs = inputs
+        self.input_shape = input_shape
+        self.is_training = is_training
 
     def get_output_shape(self):
         return self.output_shape
@@ -335,9 +337,7 @@ class JoinLayer(Layer):
         :param is_training: Whether the model is training or not
         :return:
         """
-        self.inputs = inputs
-        self.input_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.outputs = T.concatenate(inputs, axis=self.axis)
         if self.axis == 0:
             self.output_shape = self.input_shape[0]
@@ -374,14 +374,12 @@ class FCLayer(Layer):
         :param input_shape: The shape of the inputs as a tuple (not including batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.output_shape = (self.n_units,)
         self.weights = theano.shared(
             self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method,
                                  mode="FC", scale=self.activation, dtype=_floatX), borrow=True)
         self.bias = theano.shared(np.zeros(self.n_units, dtype=_floatX), borrow=True)
-        self.inputs = inputs
         self.outputs = activations[self.activation](T.dot(self.inputs, self.weights) + self.bias)
         self.params = [self.weights, self.bias]
         self.L1 = T.sum(T.abs_(self.weights)) + T.sum(T.abs_(self.bias))
@@ -423,9 +421,7 @@ class ConvLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape = input_shape
-        self.inputs = inputs
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.filter_shape = (self.filter_num, input_shape[0]) + self.filter_size
         self.filter = theano.shared(
             self.rng.get_weights(self.filter_shape, distribution="normal", method=self.init_method, mode="CONV",
@@ -462,9 +458,7 @@ class PoolLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape = input_shape
-        self.inputs = inputs
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.outputs, self.output_shape = pool(inputs, input_shape, self.down_sample_size, self.mode)
 
 
@@ -489,9 +483,7 @@ class ActLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs = inputs
-        self.input_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.outputs = activations[self.activation](self.inputs)
         self.output_shape = input_shape
 
@@ -518,8 +510,7 @@ class ReshapeLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs = inputs
-        self.input_shape = input_shape
+        Layer.build(self, inputs, input_shape, is_training)
         self.outputs = T.reshape(inputs, (inputs.shape[0],) + self.output_shape, ndim=len(self.output_shape) + 1)
 
 
@@ -546,9 +537,7 @@ class DropOutLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.input_shape = input_shape
-        self.output_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.inputs = inputs
         self.outputs = theano.ifelse.ifelse(is_training,
                                             inputs * self.rng.DropoutMask(shape=input_shape, keep_prob=self.keep_prob),
@@ -574,9 +563,7 @@ class FlattenLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs = inputs
-        self.input_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.outputs = T.flatten(inputs, 2)
         self.output_shape = (np.prod(input_shape),)
 
@@ -610,9 +597,7 @@ class BNLayer(Layer):
         :param input_shape: The shape of the inputs (excluding the batch size)
         :param is_training: Decides whether the model is currently training or not
         """
-        self.inputs = inputs
-        self.input_shape = input_shape
-        self.is_training = is_training
+        Layer.build(self, inputs, input_shape, is_training)
         self.mean = theano.shared(np.zeros(input_shape, dtype=_floatX), borrow=True)
         self.var = theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
         self.gamma = theano.shared(np.ones(input_shape, dtype=_floatX), borrow=True)
@@ -695,6 +680,48 @@ class Optimizer:
                                                   self.truth_placeholder: self.data_output[indices]})
 
 
+class AdaGrad(Optimizer):
+    """
+    AdaGrad optimizer proposed by Duchi et. al.
+    """
+
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate=0.01, epsilon=1e-8, L1=None, L2=None):
+        """
+        The constructor for the Optimizer
+        :param cost: The cost function name
+        :param one_hot: Whether the training labels are one-hot or not
+        :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
+        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
+                            else (training_samples, number_of_classes)
+        :param learning_rate: The learning rate parameter
+        :param epsilon: The smoothing factor
+        :param L1: The weight for L1 norm
+        :param L2: The weight for L2 norm
+        """
+
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output)
+        self.learning_rate = learning_rate
+        self.epsilon = epsilon
+
+    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+        """
+        Builds the actual AdaGrad optimizer
+        :param model_params: The parameters of the model
+        :param layer_updates: The updates that are required by layers apart from training
+        :param model_inputs: The model input tensor
+        :param model_outputs: The model outputs tensor
+        :param l1_val: The weight for L1 norm
+        :param l2_val: The weight for L2 norm
+        """
+        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
+        accumulator = [theano.shared(np.zeros(x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
+        new_acc = [acc + T.square(g) for acc, g in zip(accumulator, self.model_grads)]
+        self.updates = [(param, param - self.learning_rate * g / (T.sqrt(acc) + self.epsilon)) for param, g, acc in
+                        zip(self.model_params, self.model_grads, new_acc)] + [(acc, new) for acc, new in
+                                                                              zip(accumulator, new_acc)]
+        self.get_train_step()
+
+
 class ADAM(Optimizer):
     """
     ADAM optimizer proposed by Diederik et. al.
@@ -704,14 +731,14 @@ class ADAM(Optimizer):
                  L1=None, L2=None):
         """
         The constructor for the Optimizer
-        :param alpha: The alpha parameter in the paper. (Learning rate)
-        :param beta_1: The beta_1 parameter. (Decay rate)
-        :param beta_2: The beta_2 parameter. (Decay rate)
         :param cost: The cost function name
         :param one_hot: Whether the training labels are one-hot or not
         :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
                             else (training_samples, number_of_classes)
+        :param alpha: The alpha parameter in the paper. (Learning rate)
+        :param beta_1: The beta_1 parameter. (Decay rate)
+        :param beta_2: The beta_2 parameter. (Decay rate)
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         :param epsilon: The smoothing factor
@@ -759,12 +786,12 @@ class SGD(Optimizer):
         """
         The constructor for the optimizer
 
-        :param learning_rate: The learning rate parameter
         :param cost: The cost function name
         :param one_hot: Whether the training labels are one_hot or not
         :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
                             else (training_samples, number_of_classes)
+        :param learning_rate: The learning rate parameter
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         """
@@ -796,14 +823,13 @@ class SGDMomentum(Optimizer):
     def __init__(self, cost, one_hot, data_input, data_output, learning_rate, momentum, L1=None, L2=None):
         """
         The constructor for the optimizer
-
-        :param learning_rate: The learning rate parameter
-        :param momentum: The momentum parameter
         :param cost: The cost function name
         :param one_hot: Whether the training labels are one-hot or not
         :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
                             else (training_samples, number of classes)
+        :param learning_rate: The learning rate parameter
+        :param momentum: The momentum parameter
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         """
