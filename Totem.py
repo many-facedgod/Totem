@@ -134,7 +134,8 @@ def mean_squared_error(Y_true, Y_pred, one_hot=True):
 
 def binary_crossentropy(Y_true, Y_pred, one_hot=True):
     """
-    Cross-entropy loss useful for multi-label classification, i.e., when more than one label can be assigned to one instance
+    Cross-entropy loss useful for multi-label classification, i.e., when more than one label can
+    be assigned to one instance
     :param Y_true: The ground truth (in one-hot form)
     :param Y_pred: The output predicted by the model
     :return: Tensor representing the loss
@@ -259,7 +260,8 @@ class RNG:
 
     def DropoutMask(self, shape, keep_prob=0.7, dtype=_floatX):
         """
-        Returns a tensor that acts as a dropout mask for the dropout layer. The returned tensor has the shape (1, ) + shape
+        Returns a tensor that acts as a dropout mask for the dropout layer. The returned tensor
+        has the shape (1, ) + shape
         :param shape: The shape of the required mask. Note: Do not include the batch size in this tuple
         :param keep_prob: The probability of keeping the element
         :return: A tensor that serves as a mask for a dropout layer.
@@ -306,6 +308,9 @@ class Layer:
 
     def build(self, inputs, input_shape, is_training):
         return None
+
+    def get_output_shape(self):
+        return self.output_shape
 
 
 class JoinLayer(Layer):
@@ -648,8 +653,28 @@ class Optimizer:
         self.L1 = L1
         self.L2 = L2
 
-    def build(self, model_params, layer_updates, model_inputs, model_outputs, L1_val, L2_val):
-        return None
+    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+        """
+        Does the operations common to all optimizers
+        :param model_params: The parameters of the model
+        :param layer_updates: The updates that are required by layers apart from training
+        :param model_inputs: The model input tensor
+        :param model_outputs: The model outputs tensor
+        :param l1_val: The weight for L1 norm
+        :param l2_val: The weight for L2 norm
+        """
+        self.model_params = model_params
+        self.layer_updates = layer_updates
+        self.model_inputs = model_inputs
+        self.model_outputs = model_outputs
+        self.truth_placeholder = T.vector() if not self.one_hot else T.matrix()
+        self.cost = objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
+        cost_regular = self.cost
+        if self.L1 is not None:
+            cost_regular = cost_regular + self.L1 * l1_val
+        if self.L2 is not None:
+            cost_regular = cost_regular + self.L2 * l2_val
+        self.model_grads = T.grad(cost_regular, wrt=self.model_params)
 
     def set_value(self, data_input, data_output):
         """
@@ -660,13 +685,77 @@ class Optimizer:
         self.data_input.set_value(np.asarray(data_input, dtype=_floatX))
         self.data_output.set_value(np.asarray(data_output, dtype=_floatX))
 
+    def get_train_step(self):
+        """
+        Generates the train_step function for the optimizer
+        """
+        indices = T.lvector()
+        self.train_step = theano.function([indices], self.cost, updates=self.updates + self.layer_updates,
+                                          givens={self.model_inputs: self.data_input[indices],
+                                                  self.truth_placeholder: self.data_output[indices]})
+
+
+class ADAM(Optimizer):
+    """
+    ADAM optimizer proposed by Diederik et. al.
+    """
+
+    def __init__(self, cost, one_hot, data_input, data_output, alpha=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8,
+                 L1=None, L2=None):
+        """
+        The constructor for the Optimizer
+        :param alpha: The alpha parameter in the paper. (Learning rate)
+        :param beta_1: The beta_1 parameter. (Decay rate)
+        :param beta_2: The beta_2 parameter. (Decay rate)
+        :param cost: The cost function name
+        :param one_hot: Whether the training labels are one-hot or not
+        :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
+        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
+                            else (training_samples, number_of_classes)
+        :param L1: The weight for L1 norm
+        :param L2: The weight for L2 norm
+        :param epsilon: The smoothing factor
+        """
+
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
+        self.alpha = alpha
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
+
+    def build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val):
+        """
+        Builds the actual ADAM Optimizer
+        :param model_params: The parameters of the model
+        :param layer_updates: The updates that are required by layers apart from training
+        :param model_inputs: The model input tensor
+        :param model_outputs: The model outputs tensor
+        :param l1_val: The weight for L1 norm
+        :param l2_val: The weight for L2 norm
+        """
+        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
+        m_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
+        v_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
+        t = theano.shared(np.asarray(0, dtype=_floatX))
+        new_t = t + 1
+        new_m = [self.beta_1 * m + (1 - self.beta_1) * g for m, g in zip(m_t, self.model_grads)]
+        new_v = [self.beta_2 * v + (1 - self.beta_2) * (g ** 2) for v, g in zip(v_t, self.model_grads)]
+        m_cap = [m / (1 - T.power(self.beta_1, new_t)) for m in new_m]
+        v_cap = [v / (1 - T.power(self.beta_2, new_t)) for v in new_v]
+        self.updates = [(param_i, param_i - self.alpha * m / (T.sqrt(v) + self.epsilon)) for param_i, m, v in
+                        zip(self.model_params, m_cap, v_cap)] + [(t, new_t)] + [(m, new) for m, new in
+                                                                                zip(m_t, new_m)] + [(v, new) for v, new
+                                                                                                    in zip(v_t,
+                                                                                                           new_v)]
+        self.get_train_step()
+
 
 class SGD(Optimizer):
     """
     Stochastic gradient descent optimizer with mini-batches
     """
 
-    def __init__(self, learning_rate, cost, one_hot, data_input, data_output, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, L1=None, L2=None):
         """
         The constructor for the optimizer
 
@@ -674,7 +763,10 @@ class SGD(Optimizer):
         :param cost: The cost function name
         :param one_hot: Whether the training labels are one_hot or not
         :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
-        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot else (training_samples, number_of_classes)
+        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
+                            else (training_samples, number_of_classes)
+        :param L1: The weight for L1 norm
+        :param L2: The weight for L2 norm
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
         self.learning_rate = learning_rate
@@ -690,32 +782,18 @@ class SGD(Optimizer):
         :param l1_val: The actual L1 value of params
         :param l2_val: The actual L2 value of params
         """
-        self.model_params = model_params
-        self.layer_updates = layer_updates
-        self.model_inputs = model_inputs
-        self.model_outputs = model_outputs
-        self.truth_placeholder = T.vector() if not self.one_hot else T.matrix()
-        self.cost = objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
-        cost_regular = self.cost
-        if self.L1 is not None:
-            cost_regular = cost_regular + self.L1 * l1_val
-        if self.L2 is not None:
-            cost_regular = cost_regular + self.L2 * l2_val
-        self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         self.updates = [(param_i, param_i - self.learning_rate * grad_i) for (param_i, grad_i) in
-                        zip(self.model_params, self.model_grads)] + self.layer_updates
-        indices = T.lvector()
-        self.train_step = theano.function([indices], self.cost, updates=self.updates,
-                                          givens={self.model_inputs: self.data_input[indices],
-                                                  self.truth_placeholder: self.data_output[indices]})
+                        zip(self.model_params, self.model_grads)]
+        self.get_train_step()
 
 
-class SGD_momentum(Optimizer):
+class SGDMomentum(Optimizer):
     """
     Stochastic gradient descent over mini-batches with added momentum
     """
 
-    def __init__(self, learning_rate, momentum, cost, one_hot, data_input, data_output, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, momentum, L1=None, L2=None):
         """
         The constructor for the optimizer
 
@@ -724,7 +802,10 @@ class SGD_momentum(Optimizer):
         :param cost: The cost function name
         :param one_hot: Whether the training labels are one-hot or not
         :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
-        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot else (training_samples, number of classes)
+        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
+                            else (training_samples, number of classes)
+        :param L1: The weight for L1 norm
+        :param L2: The weight for L2 norm
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
         self.learning_rate = learning_rate
@@ -741,28 +822,14 @@ class SGD_momentum(Optimizer):
         :param l1_val: The actual L1 value of params
         :param l2_val: The actual L2 value of params
         """
-        self.model_params = model_params
-        self.layer_updates = layer_updates
-        self.model_inputs = model_inputs
-        self.model_outputs = model_outputs
-        self.truth_placeholder = T.vector() if not self.one_hot else T.matrix()
-        self.cost = objectives[self.cost_function](T.cast(self.truth_placeholder, "int32"), model_outputs, self.one_hot)
-        cost_regular = self.cost
-        if self.L1 is not None:
-            cost_regular = cost_regular + self.L1 * l1_val
-        if self.L2 is not None:
-            cost_regular = cost_regular + self.L2 * l2_val
-        self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        Optimizer.build(self, model_params, layer_updates, model_inputs, model_outputs, l1_val, l2_val)
         old_deltas = [theano.shared(np.zeros(shape=x.shape.eval(), dtype=_floatX), borrow=True) for x in
                       self.model_params]
         new_deltas = [-self.learning_rate * grad_i + self.momentum * old_i for (grad_i, old_i) in
                       zip(self.model_grads, old_deltas)]
         self.updates = [(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)] + [
-            (old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)] + self.layer_updates
-        indices = T.lvector()
-        self.train_step = theano.function([indices], self.cost, updates=self.updates,
-                                          givens={self.model_inputs: self.data_input[indices],
-                                                  self.truth_placeholder: self.data_output[indices]})
+            (old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)]
+        self.get_train_step()
 
 
 class Runner:
@@ -863,6 +930,9 @@ class Model:
             mode = 0
         self.is_training.set_value(mode)
 
+    def get_is_training(self):
+        return self.is_training.eval() == 1
+
     def add_layer(self, layer, source=-1):
         """
         Add a layer to the model
@@ -928,6 +998,27 @@ class Model:
         """
         return Runner(self.input_placeholder, self.input_shape, self.layers[len(self.layers) - 1].outputs,
                       self.is_training, test_input, test_output)
+
+    def get_output_shape(self, layer_name):
+        """
+        Get the output shape of a particular layer
+        :param layer_name: The name of the layer
+        :return: A tuple repersenting the shape of the layer output
+        """
+        ind = self.layer_names.index(layer_name)
+        return self.layers[ind].get_output_shape()
+
+    def run_direct(self, inputs):
+        """
+        Run the model directly on the given inputs
+        :param inputs: A numpy array of inputs
+        :return: The output of the model for the given input
+        """
+        curr_mode = self.get_is_training()
+        self.change_is_training(False)
+        op = np.asarray(self.layers[-1].outputs.eval({self.input_placeholder: inputs}))
+        self.change_is_training(curr_mode)
+        return op
 
     def save(self, file):
         """
