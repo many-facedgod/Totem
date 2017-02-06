@@ -127,7 +127,7 @@ def mean_squared_error(Y_true, Y_pred, one_hot=True):
     """
 
     if not one_hot:
-        raise ValueError("Not implemented")
+        raise NotImplementedError("Not implemented")
 
     return T.mean(T.square(Y_true - Y_pred))
 
@@ -141,7 +141,7 @@ def binary_crossentropy(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError("Not implemented")
+        raise NotImplementedError("Not implemented")
 
     return T.mean(T.nnet.binary_crossentropy(Y_pred, Y_true))
 
@@ -155,7 +155,7 @@ def mean_absolute_error(Y_true, Y_pred, one_hot=True):
     :return: Tensor representing the loss
     """
     if not one_hot:
-        raise ValueError("Not implemented")
+        raise NotImplementedError("Not implemented")
 
     return T.mean(T.abs_(Y_true - Y_pred))
 
@@ -180,10 +180,10 @@ class RNG:
         """
         return np.cast[dtype](self.np_rng.uniform())
 
-    def Gaussian(self, mean, stddev, shape, dtype):
+    def gaussian(self, mean, stddev, shape, dtype):
         return self.np_rng.normal(loc=mean, scale=stddev, size=shape).astype(dtype)
 
-    def Uniform(self, mean, stddev, shape, dtype):
+    def uniform(self, mean, stddev, shape, dtype):
         """
         Returns an array of samples drawn from a uniform distribution with the given params
         :param mean: The mean of the distribution
@@ -200,12 +200,15 @@ class RNG:
         """
         Returns a numpy ndarray of weights with Glorot style initialization
         :param shape: Shape of the required weight matrix (a tuple)
+        :param distribution: The distribution to be used for sampling
+        :param method: Which method to use for weight initialization. "glorot" or "he"
         :param mode: "FC" or "CONV", for fully connected or convolutional layers
         :param scale: Scales for different activation functions: "relu", "sigmoid", "tanh"
         :param dtype: The data type of the output array
         :return: The generated weights
         """
-        distributions = {"normal": self.Gaussian, "gaussian": self.Gaussian, "uniform": self.Uniform}
+
+        distributions = {"normal": self.gaussian, "gaussian": self.gaussian, "uniform": self.uniform}
 
         if scale == "sigmoid":
             z = 4
@@ -230,38 +233,9 @@ class RNG:
 
         return z * (distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
 
-    def Orthogonal(self, shape, mode="FC", scale="relu", dtype=_floatX):
-        """
-        Returns a numpy ndarray of weights with orthogonal initialization
-        :param shape: Shape of the required weight matrix (a tuple)
-        :param mode: "FC" or "CONV", for fully connected or convolutional layers
-        :param scale: Scales for different activation functions: "relu", "sigmoid", "tanh"
-        :param dtype: The data type of the output array
-        :return: The generated weights
-        """
-        if scale == "relu":
-            z = np.sqrt(2)
-        elif scale == "sigmoid":
-            z = 4
-        else:
-            z = 1
-
-        if mode == "FC":
-            sample = self.np_rng.normal(size=shape)
-            U, _, _ = np.linalg.svd(sample)
-            weights = (z * U[:, :shape[1]]).astype(dtype)
-        elif mode == "CONV":
-            sample = self.np_rng.normal(size=(shape[0], shape[1] * shape[2] * shape[3]))
-            _, _, V = np.linalg.svd(sample)
-            weights = (z * V[:shape[0], :]).astype(type).reshape(shape)
-        else:
-            raise TypeError
-        return weights
-
     def DropoutMask(self, shape, keep_prob=0.7, dtype=_floatX):
         """
-        Returns a tensor that acts as a dropout mask for the dropout layer. The returned tensor
-        has the shape (1, ) + shape
+        Returns a tensor that acts as a dropout mask for the dropout layer.
         :param shape: The shape of the required mask. Note: Do not include the batch size in this tuple
         :param keep_prob: The probability of keeping the element
         :return: A tensor that serves as a mask for a dropout layer.
@@ -269,7 +243,7 @@ class RNG:
         mask = self.th_rng.binomial(shape, p=keep_prob, dtype=dtype) / np.cast[dtype](keep_prob)
         return mask
 
-    def SymbolicShuffle(self, X, size=None):
+    def symbolic_shuffle(self, X, size=None):
         """
         Returns a view of the tensor with symbolically shuffled leftmost dimension. Useful for shuffling training data.
         :param X: The input tensor
@@ -621,7 +595,7 @@ class Optimizer:
     The optimizer super class
     """
 
-    def __init__(self, cost, one_hot, data_input, data_output, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, decay=None, L1=None, L2=None):
         self.model_params = None
         self.model_grads = None
         self.layer_updates = None
@@ -632,7 +606,9 @@ class Optimizer:
         self.truth_placeholder = None
         self.one_hot = one_hot
         self.cost = None
-        self.updates = None
+        self.t = theano.shared(floatX(0), borrow=True)
+        self.decay = decay
+        self.updates = [(self.t, self.t + 1)]
         self.data_input = theano.shared(np.asarray(data_input, dtype=_floatX), borrow=True, name="Train_Input")
         self.data_output = theano.shared(np.asarray(data_output, dtype=_floatX), borrow=True, name="Train_Output")
         self.L1 = L1
@@ -663,6 +639,9 @@ class Optimizer:
         if self.L2 is not None:
             cost_regular = cost_regular + self.L2 * l2_val
         self.model_grads = T.grad(cost_regular, wrt=self.model_params)
+        if self.decay is not None:
+            assert hasattr(self, "learning_rate"), "The optimizer has no learning rate to decay"
+            self.learning_rate /= (1 + self.decay * self.t)
         self.calc_updates()
         self.get_train_step()
 
@@ -690,7 +669,8 @@ class AdaGrad(Optimizer):
     AdaGrad optimizer proposed by Duchi et. al.
     """
 
-    def __init__(self, cost, one_hot, data_input, data_output, learning_rate=0.01, epsilon=1e-8, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate=0.01, epsilon=1e-8, decay=None, L1=None,
+                 L2=None):
         """
         The constructor for the Optimizer
         :param cost: The cost function name
@@ -700,11 +680,12 @@ class AdaGrad(Optimizer):
                             else (training_samples, number_of_classes)
         :param learning_rate: The learning rate parameter
         :param epsilon: The smoothing factor
+        :param decay: The decay rate
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         """
 
-        Optimizer.__init__(self, cost, one_hot, data_input, data_output)
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
         self.learning_rate = learning_rate
         self.epsilon = epsilon
 
@@ -714,9 +695,9 @@ class AdaGrad(Optimizer):
         """
         accumulator = [theano.shared(np.zeros(x.shape.eval(), dtype=_floatX), borrow=True) for x in self.model_params]
         new_acc = [acc + T.square(g) for acc, g in zip(accumulator, self.model_grads)]
-        self.updates = [(param, param - self.learning_rate * g / (T.sqrt(acc) + self.epsilon)) for param, g, acc in
-                        zip(self.model_params, self.model_grads, new_acc)] + [(acc, new) for acc, new in
-                                                                              zip(accumulator, new_acc)]
+        self.updates += [(param, param - self.learning_rate * g / (T.sqrt(acc) + self.epsilon)) for param, g, acc in
+                         zip(self.model_params, self.model_grads, new_acc)] + [(acc, new) for acc, new in
+                                                                               zip(accumulator, new_acc)]
 
 
 class ADAM(Optimizer):
@@ -725,7 +706,7 @@ class ADAM(Optimizer):
     """
 
     def __init__(self, cost, one_hot, data_input, data_output, alpha=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8,
-                 L1=None, L2=None):
+                 decay=None, L1=None, L2=None):
         """
         The constructor for the Optimizer
         :param cost: The cost function name
@@ -734,15 +715,16 @@ class ADAM(Optimizer):
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
                             else (training_samples, number_of_classes)
         :param alpha: The alpha parameter in the paper. (Learning rate)
-        :param beta_1: The beta_1 parameter. (Decay rate)
-        :param beta_2: The beta_2 parameter. (Decay rate)
+        :param beta_1: The beta_1 parameter. (Forget rate)
+        :param beta_2: The beta_2 parameter. (Forget rate)
+        :param decay: The decay rate
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         :param epsilon: The smoothing factor
         """
 
-        Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
-        self.alpha = alpha
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
+        self.learning_rate = alpha
         self.beta_1 = beta_1
         self.beta_2 = beta_2
         self.epsilon = epsilon
@@ -753,17 +735,15 @@ class ADAM(Optimizer):
         """
         m_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
         v_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
-        t = theano.shared(np.asarray(0, dtype=_floatX))
-        new_t = t + 1
         new_m = [self.beta_1 * m + (1 - self.beta_1) * g for m, g in zip(m_t, self.model_grads)]
         new_v = [self.beta_2 * v + (1 - self.beta_2) * (g ** 2) for v, g in zip(v_t, self.model_grads)]
-        m_cap = [m / (1 - T.power(self.beta_1, new_t)) for m in new_m]
-        v_cap = [v / (1 - T.power(self.beta_2, new_t)) for v in new_v]
-        self.updates = [(param_i, param_i - self.alpha * m / (T.sqrt(v) + self.epsilon)) for param_i, m, v in
-                        zip(self.model_params, m_cap, v_cap)] + [(t, new_t)] + [(m, new) for m, new in
-                                                                                zip(m_t, new_m)] + [(v, new) for v, new
-                                                                                                    in zip(v_t,
-                                                                                                           new_v)]
+        m_cap = [m / (1 - T.power(self.beta_1, self.t + 1)) for m in new_m]
+        v_cap = [v / (1 - T.power(self.beta_2, self.t + 1)) for v in new_v]
+        self.updates += [(param_i, param_i - self.learning_rate * m / (T.sqrt(v) + self.epsilon)) for param_i, m, v in
+                         zip(self.model_params, m_cap, v_cap)] + [(m, new) for m, new in
+                                                                  zip(m_t, new_m)] + [(v, new) for v, new
+                                                                                      in zip(v_t,
+                                                                                             new_v)]
 
 
 class SGD(Optimizer):
@@ -771,7 +751,7 @@ class SGD(Optimizer):
     Stochastic gradient descent optimizer with mini-batches
     """
 
-    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, decay=None, L1=None, L2=None):
         """
         The constructor for the optimizer
 
@@ -781,18 +761,19 @@ class SGD(Optimizer):
         :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
                             else (training_samples, number_of_classes)
         :param learning_rate: The learning rate parameter
+        :param decay: The decay rate
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         """
-        Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
         self.learning_rate = learning_rate
 
     def calc_updates(self):
         """
         Calculates the updates for the SGD optimizer.
         """
-        self.updates = [(param_i, param_i - self.learning_rate * grad_i) for (param_i, grad_i) in
-                        zip(self.model_params, self.model_grads)]
+        self.updates += [(param_i, param_i - self.learning_rate * grad_i) for (param_i, grad_i) in
+                         zip(self.model_params, self.model_grads)]
 
 
 class SGDMomentum(Optimizer):
@@ -800,7 +781,7 @@ class SGDMomentum(Optimizer):
     Stochastic gradient descent over mini-batches with added momentum
     """
 
-    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, momentum, L1=None, L2=None):
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate, momentum, decay=None, L1=None, L2=None):
         """
         The constructor for the optimizer
         :param cost: The cost function name
@@ -810,10 +791,11 @@ class SGDMomentum(Optimizer):
                             else (training_samples, number of classes)
         :param learning_rate: The learning rate parameter
         :param momentum: The momentum parameter
+        :param decay: The decay rate
         :param L1: The weight for L1 norm
         :param L2: The weight for L2 norm
         """
-        Optimizer.__init__(self, cost, one_hot, data_input, data_output, L1, L2)
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
         self.learning_rate = learning_rate
         self.momentum = momentum
 
@@ -825,7 +807,7 @@ class SGDMomentum(Optimizer):
                       self.model_params]
         new_deltas = [-self.learning_rate * grad_i + self.momentum * old_i for (grad_i, old_i) in
                       zip(self.model_grads, old_deltas)]
-        self.updates = [(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)] + [
+        self.updates += [(param_i, param_i + new_i) for (param_i, new_i) in zip(self.model_params, new_deltas)] + [
             (old_i, new_i) for (old_i, new_i) in zip(old_deltas, new_deltas)]
 
 

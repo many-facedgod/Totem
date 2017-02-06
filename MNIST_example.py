@@ -12,7 +12,7 @@ Vx, Vy = Valid
 n_batches = 100
 batch_size = 500
 x = Model((1, 28, 28))
-n_iters = 50
+n_iters = 5
 x.add_layer(ConvLayer("Conv1", 10, (3, 3), r, activation="relu", init_method="glorot"))
 x.add_layer(PoolLayer("Pool1", (2, 2), mode="max"))
 x.add_layer(ConvLayer("Conv2", 5, (3, 3), r, activation="relu", init_method="glorot"))
@@ -31,7 +31,7 @@ x.add_layer(BNLayer("BN1"))
 x.add_layer(FCLayer("FC1", 400, r, "relu"))
 x.add_layer(FCLayer("FC2", 10, r, "softmax"))
 
-opt = ADAM("cce", False, Trainx.reshape((50000, 1, 28, 28)), Trainy, )
+opt = ADAM("cce", False, Trainx.reshape((50000, 1, 28, 28)), Trainy, decay=1e-3)
 run = x.get_runner(Vx.reshape((10000, 1, 28, 28)), Vy)
 x.build_optimizer(opt)
 
