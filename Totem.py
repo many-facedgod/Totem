@@ -9,7 +9,7 @@ import theano.ifelse
 
 _floatX = theano.config.floatX
 activations = {"sigmoid": T.nnet.sigmoid, "relu": T.nnet.relu, "tanh": T.tanh, "softmax": T.nnet.softmax,
-               "None": lambda x: x, None: lambda x: x}
+               "softplus": lambda x: T.log(1 + T.exp(x)), "None": lambda x: x, None: lambda x: x}
 tensors = [T.scalar, T.vector, T.matrix, T.tensor3, T.tensor4]
 
 
@@ -662,6 +662,43 @@ class Optimizer:
         self.train_step = theano.function([indices], self.cost, updates=self.updates + self.layer_updates,
                                           givens={self.model_inputs: self.data_input[indices],
                                                   self.truth_placeholder: self.data_output[indices]})
+
+
+class RMSProp(Optimizer):
+    """
+    RMSProp proposed by Hinton et. al.
+    """
+
+    def __init__(self, cost, one_hot, data_input, data_output, learning_rate=0.001, rho=0.9, epsilon=1e-8, decay=None,
+                 L1=None, L2=None):
+        """
+        The constructor for the optimizer
+        :param cost: The cost function name
+        :param one_hot: Whether the training labels are one-hot or not
+        :param data_input: The input data tensor. Expected shape (training_samples, ) + model.input_shape
+        :param data_output: The outputs data tensor. Expected shape (training_samples, ) if one_hot
+                            else (training_samples, number_of_classes)
+        :param learning_rate: The learning rate parameter
+        :param rho: The forgetting factor
+        :param epsilon: The smoothing factor
+        :param decay: The decay rate
+        :param L1: The weight for L1 norm
+        :param L2: The weight for L2 norm
+        """
+
+        Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
+        self.learning_rate = learning_rate
+        self.rho = rho
+        self.epsilon = epsilon
+
+    def calc_updates(self):
+        """
+        Calculates the updates for RMSProp optimizer
+        """
+        v_t = [theano.shared(np.zeros(x.shape.eval()).astype(_floatX), borrow=True) for x in self.model_params]
+        new_v = [self.rho * v + (1 - self.rho) * (g ** 2) for v, g in zip(v_t, self.model_grads)]
+        self.updates += [(param, param - self.learning_rate * g / (T.sqrt(v) + self.epsilon)) for param, g, v in
+                         zip(self.model_params, self.model_grads, new_v)] + [(v, new) for v, new in zip(v_t, new_v)]
 
 
 class AdaGrad(Optimizer):
