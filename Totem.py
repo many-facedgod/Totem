@@ -8,9 +8,6 @@ import pickle
 import theano.ifelse
 
 _floatX = theano.config.floatX
-activations = {"sigmoid": T.nnet.sigmoid, "relu": T.nnet.relu, "tanh": T.tanh, "softmax": T.nnet.softmax,
-               "softplus": lambda x: T.log(1 + T.exp(x)), "None": lambda x: x, None: lambda x: x}
-tensors = [T.scalar, T.vector, T.matrix, T.tensor3, T.tensor4]
 
 
 def floatX(x):
@@ -20,6 +17,147 @@ def floatX(x):
     :return: the typecasted value
     """
     return np.cast[_floatX](x)
+
+
+tensors = [T.scalar, T.vector, T.matrix, T.tensor3, T.tensor4]
+
+
+def relu(inputs, shape):
+    """
+    Activates the inputs by applying rectified linear units.
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size).
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.nnet.relu(inputs), []
+
+
+def sigmoid(inputs, shape):
+    """
+    Activates the inputs by applying the sigmoid function
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size).
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.nnet.sigmoid(inputs), []
+
+
+def tanh(inputs, shape):
+    """
+    Activates the inputs by applying the tanh function
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size).
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.tanh(inputs), []
+
+
+def softmax(inputs, shape):
+    """
+    Activates the inputs by applying the softmax function
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size).
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.nnet.softmax(inputs), []
+
+
+def softplus(inputs, shape):
+    """
+    Activates the inputs by applying the softplus function
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size).
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.log(1 + T.exp(inputs)), []
+
+
+def identity(inputs, shape):
+    """
+    Returns the input tensor as it is
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size)
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return inputs, []
+
+
+def leaky_relu(inputs, shape, alpha=0.1):
+    """
+    Activates the inputs by applying the "leaky" version of relu
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size)
+    :param alpha: The slope of the function when input is negative
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.nnet.relu(inputs, alpha), []
+
+
+
+def elu(inputs, shape, alpha=1.0):
+    """
+    Activates the inputs by applying the exponential linear unit
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size)
+    :param alpha: The alpha parameter for the function.
+    :return: The activated tensor, list of learnable parameters (None in this case).
+    """
+
+    return T.nnet.elu(inputs, alpha), []
+
+
+def prelu(inputs, shape, axes=(1,), init=0.25):
+    """
+    Activates the inputs by applying the parametrized (learnable) relu
+    :param inputs: The input tensor
+    :param shape: The shape of the input tensor (without the batch size)
+    :param axes: The axes over which the parameters should differ. Must be a tuple. 0 is the batch axis so the tuple
+                 cannot have a 0. The dimensions must be in the increasing order.
+    :param init: The initial value of all the alphas.
+    :return: The activated tensor, list of learnable parameters.
+    """
+
+    alpha_shape = [shape[i - 1] for i in axes]
+    alphas = theano.shared(np.ones(alpha_shape, dtype=_floatX) * floatX(init), borrow=True)
+    dimshuf = ['x']
+    k = 0
+    for i in range(1, len(shape) + 1):
+        if i in axes:
+            dimshuf.append(k)
+            k += 1
+        else:
+            dimshuf.append('x')
+    return T.nnet.relu(inputs, alphas.dimshuffle(dimshuf)), [alphas]
+
+
+activations = {"sigmoid": sigmoid, "relu": relu, "tanh": tanh, "softmax": softmax,
+               "softplus": softplus, "elu": elu,
+               "prelu": prelu, "leaky_relu": leaky_relu, "None": identity, None: identity}
+
+
+def activate(inputs, input_shape, activation):
+    """
+    Common interface for all activations
+    :param inputs: The input tensor
+    :param input_shape: The shape of the input tensor (without the batch size)
+    :param activation: The activation name or a tuple (act_name, dict_of_params)
+    :return: The activated tensor, list of learnable parameters.
+    """
+
+    if type(activation) is tuple or type(activation) is list:
+        act_name = activation[0]
+        kwargs = activation[1]
+    else:
+        act_name = activation
+        kwargs = {}
+    return activations[act_name](inputs, input_shape, **kwargs)
 
 
 def exp_avg(X_curr, X_new, momentum):
@@ -33,7 +171,7 @@ def exp_avg(X_curr, X_new, momentum):
     return X_curr, X_curr * momentum + X_new * (1 - momentum)
 
 
-def BNormalize(X, mean, variance, gamma, beta, epsilon=1e-03, mode="low_mem"):
+def batch_normalize(X, mean, variance, gamma, beta, epsilon=1e-03, mode="low_mem"):
     """
     Returns a batch normalization graph for a batch
     :param X: Input batch
@@ -111,7 +249,7 @@ def categorical_crossentropy(Y_true, Y_pred, one_hot=False, epsilon=1e-15):
     :return: Tensor representing the loss.
     """
     if not one_hot:
-        return -T.mean(T.log(T.clip(Y_pred[T.arange(Y_pred.shape[0]), Y_true], floatX(epsilon), floatX(np.inf))))
+        return -T.mean(T.log(T.clip(Y_pred[T.arange(Y_pred.shape[0]), Y_true], epsilon, np.inf)))
     else:
         return T.mean(T.nnet.categorical_crossentropy(Y_pred, Y_true))
 
@@ -209,7 +347,8 @@ class RNG:
         """
 
         distributions = {"normal": self.gaussian, "gaussian": self.gaussian, "uniform": self.uniform}
-
+        if type(scale) is tuple:
+            scale = scale[0]
         if scale == "sigmoid":
             z = 4
         else:
@@ -233,7 +372,7 @@ class RNG:
 
         return z * (distributions[distribution](mean=0.0, stddev=stddev, shape=shape, dtype=dtype))
 
-    def DropoutMask(self, shape, keep_prob=0.7, dtype=_floatX):
+    def get_dropout_mask(self, shape, keep_prob=0.7, dtype=_floatX):
         """
         Returns a tensor that acts as a dropout mask for the dropout layer.
         :param shape: The shape of the required mask. Note: Do not include the batch size in this tuple
@@ -255,7 +394,7 @@ class RNG:
         else:
             return X[self.th_rng.permutation(n=size)]
 
-    def Shuffle(self, x):
+    def shuffle(self, x):
         """
         Shuffles a numpy array
         :param x: The numpy array
@@ -331,7 +470,8 @@ class FCLayer(Layer):
         :param name: The name of this layer. Not optional.
         :param n_units: Number of fully connected units in the layer
         :param rng: An RNG instance
-        :param activation: The name of the activation function to be used
+        :param activation: The name of the activation function. If it takes parameters, give a tuple of
+                           (name, dict_of_params)
         """
         Layer.__init__(self, name)
         self.n_units = n_units
@@ -354,8 +494,9 @@ class FCLayer(Layer):
             self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method,
                                  mode="FC", scale=self.activation, dtype=_floatX), borrow=True)
         self.bias = theano.shared(np.zeros(self.n_units, dtype=_floatX), borrow=True)
-        self.outputs = activations[self.activation](T.dot(self.inputs, self.weights) + self.bias)
-        self.params = [self.weights, self.bias]
+        self.outputs, param_list = activate(T.dot(self.inputs, self.weights) + self.bias, self.output_shape,
+                                            self.activation)
+        self.params = [self.weights, self.bias] + param_list
         self.L1 = T.sum(T.abs_(self.weights)) + T.sum(T.abs_(self.bias))
         self.L2 = T.sum(T.square(self.weights)) + T.sum(T.square(self.bias))
 
@@ -373,7 +514,8 @@ class ConvLayer(Layer):
         :param filter_num: Number of filters
         :param filter_size: Size of each filter (2D)
         :param rng: RNG instance for weight initialization
-        :param activation: activation function
+        :param activation: The name of the activation function. If it takes parameters, give a tuple of
+                           (name, dict_of_params)
         :param mode: Convolution padding mode
         """
         Layer.__init__(self, name)
@@ -402,11 +544,12 @@ class ConvLayer(Layer):
                                  scale=self.activation, dtype=_floatX), borrow=True)
         self.bias = theano.shared(np.zeros(self.filter_num, dtype=_floatX), borrow=True)
         conv, shape = conv2d(inputs, self.filter, input_shape, self.filter_shape, mode=self.mode, strides=self.strides)
-        self.outputs = activations[self.activation](conv + self.bias.dimshuffle('x', 0, 'x', 'x'))
-        self.params = [self.filter, self.bias]
+        self.output_shape = shape
+        self.outputs, param_list = activate(conv + self.bias.dimshuffle('x', 0, 'x', 'x'), self.output_shape,
+                                            self.activation)
+        self.params = [self.filter, self.bias] + param_list
         self.L1 = T.sum(T.abs_(self.filter)) + T.sum(T.abs_(self.bias))
         self.L2 = T.sum(T.square(self.filter)) + T.sum(T.square(self.bias))
-        self.output_shape = shape
 
 
 class PoolLayer(Layer):
@@ -445,7 +588,8 @@ class ActLayer(Layer):
         """
         Constructor for the layer
         :param name: The name of this layer. Not optional.
-        :param activation: The activation function
+        :param activation: The name of the activation function. If it takes parameters, give a tuple of
+                           (name, dict_of_params)
         """
         Layer.__init__(self, name)
         self.activation = activation
@@ -458,8 +602,9 @@ class ActLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
-        self.outputs = activations[self.activation](self.inputs)
         self.output_shape = input_shape
+        self.outputs, param_list = activate(self.inputs, self.output_shape, self.activation)
+        self.params += param_list
 
 
 class ReshapeLayer(Layer):
@@ -514,7 +659,8 @@ class DropOutLayer(Layer):
         Layer.build(self, inputs, input_shape, is_training)
         self.inputs = inputs
         self.outputs = theano.ifelse.ifelse(is_training,
-                                            inputs * self.rng.DropoutMask(shape=input_shape, keep_prob=self.keep_prob),
+                                            inputs * self.rng.get_dropout_mask(shape=input_shape,
+                                                                               keep_prob=self.keep_prob),
                                             inputs)
 
 
@@ -579,10 +725,10 @@ class BNLayer(Layer):
         cur_mean = T.mean(inputs, axis=0)
         cur_var = T.var(inputs, axis=0)
         self.outputs = theano.ifelse.ifelse(is_training,
-                                            BNormalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta,
-                                                       self.epsilon, self.mode),
-                                            BNormalize(self.inputs, self.mean, self.var, self.gamma, self.beta,
-                                                       self.epsilon, self.mode))
+                                            batch_normalize(self.inputs, cur_mean, cur_var, self.gamma, self.beta,
+                                                            self.epsilon, self.mode),
+                                            batch_normalize(self.inputs, self.mean, self.var, self.gamma, self.beta,
+                                                            self.epsilon, self.mode))
         self.output_shape = self.input_shape
         self.params = [self.gamma, self.beta]
         self.updates = [exp_avg(self.mean, cur_mean, self.momentum), exp_avg(self.var, cur_var, self.momentum)]
