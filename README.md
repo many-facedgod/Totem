@@ -1,4 +1,12 @@
 # Totem
-A simple Keras-like wrapper over Theano to facilitate easy creation of sequential neural networks.
 
-A simple example over the MNIST dataset is also provided.
+A Keras like wrapper built specifically for theano. Currently, it supports only feed forward networks including multiple parallel branches and concatenation of outputs. Recurrent nets yet to be implemented.
+
+
+### Prerequisites
+
+Currently, the list of dependencies include Theano, Numpy, scikit-learn and Pickle/cPickle.
+
+## Authors
+
+* **Tanmaya Shekhar Dabral** - [many-facedgod](https://github.com/many-facedgod)
