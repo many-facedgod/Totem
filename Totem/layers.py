@@ -297,6 +297,8 @@ class FlattenLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.outputs = U.T.flatten(inputs, 2)
         self.output_shape = (U.np.prod(input_shape),)
 
@@ -331,6 +333,8 @@ class BNLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.mean = U.shared(U.zeros(input_shape, dtype=U._floatX), borrow=True)
         self.var = U.shared(U.ones(input_shape, dtype=U._floatX), borrow=True)
         self.gamma = U.shared(U.ones(input_shape, dtype=U._floatX), borrow=True)
