@@ -89,6 +89,8 @@ class FCLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.output_shape = (self.n_units,)
         self.weights = U.shared(
             self.rng.get_weights((self.input_shape[0], self.n_units), distribution="normal", method=self.init_method,
@@ -138,6 +140,8 @@ class ConvLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.filter_shape = (self.filter_num, input_shape[0]) + self.filter_size
         self.filter = U.shared(
             self.rng.get_weights(self.filter_shape, distribution="normal", method=self.init_method, mode="CONV",
@@ -177,6 +181,8 @@ class PoolLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.outputs, self.output_shape = U.pool(inputs, input_shape, self.down_sample_size, self.mode)
 
 
@@ -203,6 +209,8 @@ class ActLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.output_shape = input_shape
         self.outputs, param_list = activate(self.inputs, self.output_shape, self.activation)
         self.params += param_list
@@ -231,6 +239,8 @@ class ReshapeLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.outputs = U.T.reshape(inputs, (inputs.shape[0],) + self.output_shape, ndim=len(self.output_shape) + 1)
 
 
@@ -258,11 +268,13 @@ class DropOutLayer(Layer):
         :param is_training: Decides whether the model is currently training or not
         """
         Layer.build(self, inputs, input_shape, is_training)
-        self.inputs = inputs
+        if isinstance(inputs, list) or isinstance(input_shape[0], tuple):
+            raise ValueError("Layer takes input from only one source")
         self.outputs = U.ifelse(is_training,
                                 inputs * self.rng.get_dropout_mask(shape=input_shape,
                                                                    keep_prob=self.keep_prob),
                                 inputs)
+        self.output_shape = self.input_shape
 
 
 class FlattenLayer(Layer):
