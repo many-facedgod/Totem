@@ -13,8 +13,8 @@ Vx, Vy = Valid
 n_batches = 100
 batch_size = 500
 x = model.Model((1, 28, 28))
-n_iters = 20
-x.add_layer(layers.ConvLayer("Conv1", 10, (3, 3), r, activation="leaky_relu", init_method="glorot"))
+n_iters = 10
+x.add_layer(layers.ConvLayer("Conv1", 10, (3, 3), r, activation="leaky_relu", init_method="glorot", mode="valid"))
 x.add_layer(layers.PoolLayer("Pool1", (2, 2), mode="max"))
 x.add_layer(layers.ConvLayer("Conv2", 5, (3, 3), r, activation=("leaky_relu", {"alpha": 0.02}), init_method="glorot"))
 x.add_layer(layers.PoolLayer("Pool2", (2, 2)))

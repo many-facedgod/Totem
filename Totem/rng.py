@@ -1,13 +1,14 @@
 from . import utils as U
 
+
 class RNG:
     """
-    Wrapper around numpy's random number generated
+    Wrapper around numpy's and theano's random number generated
     """
 
     def __init__(self, seed):
         self.np_rng = U.np.random.RandomState(seed)
-        self.th_rng = U.T.shared_randomstreams.RandomStreams(seed)
+        self.th_rng = U.RandomStreams(seed)
 
     def random(self, dtype=U._floatX):
         """
@@ -17,6 +18,14 @@ class RNG:
         return U.np.cast[dtype](self.np_rng.uniform())
 
     def gaussian(self, mean, stddev, shape, dtype):
+        """
+        Returns an array of samples drawn from a gaussian distribution with the given params
+        :param mean: The mean of the distribution
+        :param stddev: The standard deviaion of the dis
+        :param shape: The shape of the required output
+        :param dtype: The data type required
+        :return: The generated random sample
+        """
         return self.np_rng.normal(loc=mean, scale=stddev, size=shape).astype(dtype)
 
     def uniform(self, mean, stddev, shape, dtype):
@@ -24,9 +33,9 @@ class RNG:
         Returns an array of samples drawn from a uniform distribution with the given params
         :param mean: The mean of the distribution
         :param stddev: The standard deviaion of the dis
-        :param shape:
-        :param dtype:
-        :return:
+        :param shape: The shape of the required output
+        :param dtype: The data type required
+        :return: The generated random sample
         """
         low = mean - stddev * U.np.sqrt(3)
         high = mean + stddev * U.np.sqrt(3)
@@ -75,22 +84,11 @@ class RNG:
         Returns a tensor that acts as a dropout mask for the dropout layer.
         :param shape: The shape of the required mask. Note: Do not include the batch size in this tuple
         :param keep_prob: The probability of keeping the element
+        :param dtype: The data type of the tensor required
         :return: A tensor that serves as a mask for a dropout layer.
         """
         mask = self.th_rng.binomial(shape, p=keep_prob, dtype=dtype) / U.np.cast[dtype](keep_prob)
         return mask
-
-    def symbolic_shuffle(self, X, size=None):
-        """
-        Returns a view of the tensor with symbolically shuffled leftmost dimension. Useful for shuffling training data.
-        :param X: The input tensor
-        :param size: The size of the leftmost dimension, if known
-        :return: The shuffled view of the tensor
-        """
-        if size is None:
-            return X[self.th_rng.permutation(n=X.shape[0])]
-        else:
-            return X[self.th_rng.permutation(n=size)]
 
     def shuffle(self, x):
         """

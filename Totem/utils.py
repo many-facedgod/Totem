@@ -5,6 +5,7 @@ import numpy as np
 from numpy import ones, zeros, asarray
 from theano.ifelse import ifelse
 from sklearn.metrics import roc_auc_score
+from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 import numpy as np
 
 try:
