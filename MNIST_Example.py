@@ -1,5 +1,5 @@
 from __future__ import print_function
-from Totem import *
+from totem import *
 import numpy as np
 import gzip
 import cPickle as pickle
