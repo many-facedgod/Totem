@@ -19,6 +19,7 @@ class Optimizer:
         self.one_hot = one_hot
         self.cost = None
         self.t = U.shared(U.floatX(0), borrow=True)
+        self.learning_rate = U.shared(U.floatX(0.))
         self.decay = decay
         self.updates = [(self.t, self.t + 1)]
         self.data_input = U.shared(U.asarray(data_input, dtype=U._floatX), borrow=True, name="Train_Input")
@@ -53,7 +54,6 @@ class Optimizer:
             cost_regular = cost_regular + self.L2 * l2_val
         self.model_grads = U.T.grad(cost_regular, wrt=self.model_params)
         if self.decay is not None:
-            assert hasattr(self, "learning_rate"), "The optimizer has no learning rate to decay"
             self.learning_rate /= (1 + self.decay * self.t)
         self.calc_updates()
         self.get_train_step()
@@ -66,6 +66,20 @@ class Optimizer:
         """
         self.data_input.set_value(U.asarray(data_input, dtype=U._floatX))
         self.data_output.set_value(U.asarray(data_output, dtype=U._floatX))
+
+    def set_learning_rate(self, learning_rate):
+        """
+        Change the learning rate for this optimizer.
+        :param learning_rate: The new learning rate
+        """
+        assert self.decay is None, "Cannot change the learning rate if it is already decaying"
+        self.learning_rate.set_value(learning_rate)
+
+    def get_learning_rate(self):
+        """
+        Get the current learning rate
+        """
+        return self.learning_rate.eval()
 
     def get_train_step(self):
         """
@@ -100,7 +114,7 @@ class RMSProp(Optimizer):
         """
 
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
-        self.learning_rate = learning_rate
+        self.learning_rate.set_value(learning_rate)
         self.rho = rho
         self.epsilon = epsilon
 
@@ -136,7 +150,7 @@ class AdaGrad(Optimizer):
         """
 
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
-        self.learning_rate = learning_rate
+        self.learning_rate.set_value(learning_rate)
         self.epsilon = epsilon
 
     def calc_updates(self):
@@ -174,7 +188,7 @@ class ADAM(Optimizer):
         """
 
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
-        self.learning_rate = alpha
+        self.learning_rate.set_value(alpha)
         self.beta_1 = beta_1
         self.beta_2 = beta_2
         self.epsilon = epsilon
@@ -216,7 +230,7 @@ class SGD(Optimizer):
         :param L2: The weight for L2 norm
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
-        self.learning_rate = learning_rate
+        self.learning_rate.set_value(learning_rate)
 
     def calc_updates(self):
         """
@@ -246,7 +260,7 @@ class SGDMomentum(Optimizer):
         :param L2: The weight for L2 norm
         """
         Optimizer.__init__(self, cost, one_hot, data_input, data_output, decay, L1, L2)
-        self.learning_rate = learning_rate
+        self.learning_rate.set_value(learning_rate)
         self.momentum = momentum
 
     def calc_updates(self):

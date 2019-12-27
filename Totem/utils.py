@@ -1,12 +1,14 @@
-import theano.tensor as T
-from theano import shared, function
+import numpy as np
 import theano
-import numpy as np
+import theano.tensor as T
+import theano.tensor.signal.conv
+import theano.tensor.signal.pool
+
 from numpy import ones, zeros, asarray
-from theano.ifelse import ifelse
 from sklearn.metrics import roc_auc_score
+from theano import shared, function
+from theano.ifelse import ifelse
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
-import numpy as np
 
 try:
     import cPickle as pickle
