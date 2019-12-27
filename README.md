@@ -13,6 +13,11 @@ A wrapper over [Theano](http://deeplearning.net/software/theano/) for quick crea
 The class `model.Model` represents a feedforward network. After initializing the model, the layers can be added to it using the `model.add_layer` function. The layers are defined in `layers.py` and contain most of the standard layers. Once all the layers have been added, the `model.build` function can be used to build the entire graph. The optimizer can be build using the `model.build_optimizer` method by passing one of the optimizers defined in `optimizers.py`.
 
 A detailed working example is shown in `MNIST_Example.py`.
+
+## Installation
+    git clone https://github.com/many-facedgod/Totem
+    cd Totem
+    pip install .
 ## Authors
 
 * **Tanmaya Shekhar Dabral** - [many-facedgod](https://github.com/many-facedgod)
